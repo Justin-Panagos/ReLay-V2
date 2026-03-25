@@ -1,0 +1,59 @@
+# Rust
+/target
+src-tauri/target
+**/*.rs.bk
+Cargo.lock
+
+# Node
+node_modules/
+dist/
+.npm/
+
+# Tauri build outputs
+src-tauri/target/
+bundle/
+
+# SQLite databases
+*.db
+*.db-shm
+*.db-wal
+
+# ICP / dfx
+.dfx/
+*.did.d.ts
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Editor
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+
+# Logs
+*.log
+logs/
+
+# Test artifacts
+/test-downloads/
+/quarantine/
+eicar*
+
+# Build tools
+.cache/
