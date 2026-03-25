@@ -2,7 +2,6 @@
 /target
 src-tauri/target
 **/*.rs.bk
-Cargo.lock
 
 # Node
 node_modules/
@@ -57,3 +56,9 @@ eicar*
 
 # Build tools
 .cache/
+
+# Private docs
+relay_investor_pitch.md
+relay_consolidated_plan.md
+BUILD_PLAN.md
+CLAUDE.md
