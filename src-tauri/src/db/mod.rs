@@ -30,6 +30,18 @@ fn migrations() -> Migrations<'static> {
                 completed_at     TEXT
             );",
         ),
+        // v2 — pause/resume support
+        M::up(
+            "ALTER TABLE downloads ADD COLUMN paused_at TEXT;
+            CREATE TABLE chunk_offsets (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                download_id   INTEGER NOT NULL,
+                chunk_idx     INTEGER NOT NULL,
+                start_byte    INTEGER NOT NULL,
+                end_byte      INTEGER NOT NULL,
+                written_bytes INTEGER NOT NULL DEFAULT 0
+            );",
+        ),
     ])
 }
 
@@ -136,6 +148,16 @@ pub struct DownloadRecord {
     pub downloaded_bytes: i64,
     pub created_at: String,
     pub completed_at: Option<String>,
+    pub paused_at: Option<String>,
+}
+
+/// Per-chunk byte-offset snapshot used to resume a paused chunked download.
+#[derive(Debug, Clone)]
+pub struct ChunkSnapshot {
+    pub chunk_idx: usize,
+    pub start_byte: u64,
+    pub end_byte: u64,
+    pub written_bytes: u64,
 }
 
 /// Inserts a new download row with status `queued` and returns its id.
@@ -164,7 +186,7 @@ pub fn insert_download(
 }
 
 /// Updates the status field of a download row.
-/// Also sets `completed_at` to the current Unix timestamp when status is "complete".
+/// Also sets `completed_at` when status is "complete", and `paused_at` when status is "paused".
 ///
 /// Args:
 ///   conn:   Open database connection.
@@ -174,6 +196,11 @@ pub fn update_download_status(conn: &Connection, id: i64, status: &str) -> Resul
     if status == "complete" {
         conn.execute(
             "UPDATE downloads SET status = ?1, completed_at = ?2 WHERE id = ?3",
+            rusqlite::params![status, unix_now(), id],
+        )?;
+    } else if status == "paused" {
+        conn.execute(
+            "UPDATE downloads SET status = ?1, paused_at = ?2 WHERE id = ?3",
             rusqlite::params![status, unix_now(), id],
         )?;
     } else {
@@ -227,7 +254,7 @@ pub fn update_download_size(conn: &Connection, id: i64, size_bytes: u64) -> Resu
 pub fn get_recent_downloads(conn: &Connection, limit: i64) -> Result<Vec<DownloadRecord>> {
     let mut stmt = conn.prepare(
         "SELECT id, url, filename, destination, status,
-                size_bytes, downloaded_bytes, created_at, completed_at
+                size_bytes, downloaded_bytes, created_at, completed_at, paused_at
          FROM downloads
          ORDER BY created_at DESC
          LIMIT ?1",
@@ -244,10 +271,121 @@ pub fn get_recent_downloads(conn: &Connection, limit: i64) -> Result<Vec<Downloa
             downloaded_bytes: row.get(6)?,
             created_at: row.get(7)?,
             completed_at: row.get(8)?,
+            paused_at: row.get(9)?,
         })
     })?;
 
     rows.collect()
+}
+
+/// Returns a single download row by id.
+///
+/// Args:
+///   conn: Open database connection.
+///   id:   The download row id.
+///
+/// Returns:
+///   Some(DownloadRecord) if found, None otherwise.
+pub fn get_download_by_id(conn: &Connection, id: i64) -> Result<Option<DownloadRecord>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, url, filename, destination, status,
+                size_bytes, downloaded_bytes, created_at, completed_at, paused_at
+         FROM downloads WHERE id = ?1",
+    )?;
+
+    let mut rows = stmt.query_map([id], |row| {
+        Ok(DownloadRecord {
+            id: row.get(0)?,
+            url: row.get(1)?,
+            filename: row.get(2)?,
+            destination: row.get(3)?,
+            status: row.get(4)?,
+            size_bytes: row.get(5)?,
+            downloaded_bytes: row.get(6)?,
+            created_at: row.get(7)?,
+            completed_at: row.get(8)?,
+            paused_at: row.get(9)?,
+        })
+    })?;
+
+    match rows.next() {
+        Some(record) => Ok(Some(record?)),
+        None => Ok(None),
+    }
+}
+
+/// Persists per-chunk byte-offset snapshots for a paused download.
+/// Deletes any existing snapshots for the download before inserting new ones.
+///
+/// Args:
+///   conn:        Open database connection.
+///   download_id: The download row id.
+///   snapshots:   Slice of ChunkSnapshot structs to persist.
+pub fn save_chunk_snapshots(
+    conn: &Connection,
+    download_id: i64,
+    snapshots: &[ChunkSnapshot],
+) -> Result<()> {
+    conn.execute(
+        "DELETE FROM chunk_offsets WHERE download_id = ?1",
+        [download_id],
+    )?;
+    for snap in snapshots {
+        conn.execute(
+            "INSERT INTO chunk_offsets (download_id, chunk_idx, start_byte, end_byte, written_bytes)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![
+                download_id,
+                snap.chunk_idx as i64,
+                snap.start_byte as i64,
+                snap.end_byte as i64,
+                snap.written_bytes as i64
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+/// Loads per-chunk byte-offset snapshots for a paused download, ordered by chunk_idx.
+///
+/// Args:
+///   conn:        Open database connection.
+///   download_id: The download row id.
+///
+/// Returns:
+///   Vec of ChunkSnapshot structs ordered by chunk_idx ascending.
+pub fn load_chunk_snapshots(conn: &Connection, download_id: i64) -> Result<Vec<ChunkSnapshot>> {
+    let mut stmt = conn.prepare(
+        "SELECT chunk_idx, start_byte, end_byte, written_bytes
+         FROM chunk_offsets
+         WHERE download_id = ?1
+         ORDER BY chunk_idx ASC",
+    )?;
+
+    let rows = stmt.query_map([download_id], |row| {
+        Ok(ChunkSnapshot {
+            chunk_idx: row.get::<_, i64>(0)? as usize,
+            start_byte: row.get::<_, i64>(1)? as u64,
+            end_byte: row.get::<_, i64>(2)? as u64,
+            written_bytes: row.get::<_, i64>(3)? as u64,
+        })
+    })?;
+
+    rows.collect()
+}
+
+/// Deletes all chunk_offsets rows for a download.
+/// Called after a download completes, is cancelled, or resumes successfully.
+///
+/// Args:
+///   conn:        Open database connection.
+///   download_id: The download row id.
+pub fn delete_chunk_snapshots(conn: &Connection, download_id: i64) -> Result<()> {
+    conn.execute(
+        "DELETE FROM chunk_offsets WHERE download_id = ?1",
+        [download_id],
+    )?;
+    Ok(())
 }
 
 /// Returns the current time as a Unix timestamp string.

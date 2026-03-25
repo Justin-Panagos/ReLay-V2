@@ -1,39 +1,63 @@
 //! Parallel chunked HTTP download engine.
 //! Splits a file into N byte ranges and fetches them concurrently.
-//! The caller is responsible for falling back to single-stream if the server
-//! does not advertise Accept-Ranges support.
+//! Supports pause via CancellationToken: each chunk yields cleanly when cancelled,
+//! allowing byte-offset snapshots to be saved for resume.
 
+use crate::db::ChunkSnapshot;
 use std::io::{BufWriter, Seek, SeekFrom, Write};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::Manager;
 use tokio::task::JoinSet;
+use tokio_util::sync::CancellationToken;
 
 /// Free-tier maximum concurrent chunks.
-pub const FREE_TIER_CHUNKS: usize = 4;
+pub const FREE_TIER_CHUNKS: usize = 8;
 /// Minimum chunk size in bytes — files smaller than this use a single chunk.
 pub const MIN_CHUNK_BYTES: u64 = 1_048_576; // 1 MB
 
-/// Downloads a file using parallel HTTP range requests.
+/// Outcome of a single chunk task.
+enum ChunkStatus {
+    Complete,
+    Paused,
+}
+
+/// Outcome returned by `download_chunked` to `run_download`.
+pub enum LifecycleOutcome {
+    /// All chunks completed successfully.
+    Complete,
+    /// Download was interrupted (pause or cancel) — snapshots contain per-chunk byte counts.
+    Paused(Vec<ChunkSnapshot>),
+}
+
+/// Downloads a file using parallel HTTP range requests, with cancellation support.
 ///
 /// Chunk 0 is streamed directly from `probe` (the already-open GET response),
 /// avoiding a wasted connection teardown and reconnect. Chunks 1..N are fetched
 /// with Range GETs. Writes directly to non-overlapping regions of a pre-allocated
-/// file. Emits `download://progress/{id}` events every 200 ms. If any chunk fails,
-/// all remaining chunks are cancelled and an error is returned.
+/// file. Emits `download://progress/{id}` events every 200 ms.
+///
+/// If `token` is cancelled, all chunk tasks yield cleanly and the function returns
+/// `LifecycleOutcome::Paused` with per-chunk byte-offset snapshots.
+///
+/// If `resume_offsets` is `Some`, each chunk resumes from `start_byte + written_bytes`
+/// instead of `start_byte`, skipping already-written data.
 ///
 /// Args:
-///   url:        The HTTP/HTTPS URL to download.
-///   path:       Destination file path — will be created or truncated.
-///   total_size: Exact file size in bytes (from Content-Length).
-///   probe:      Already-open GET response — reused as chunk 0.
-///   id:         The downloads table row id (used in event names).
-///   app:        Tauri app handle for emitting progress events.
-///   client:     Shared reqwest client for chunk 1..N requests.
+///   url:            The HTTP/HTTPS URL to download.
+///   path:           Destination file path — must be pre-allocated or will be truncated.
+///   total_size:     Exact file size in bytes (from Content-Length).
+///   probe:          Already-open GET response — reused as chunk 0.
+///   id:             The downloads table row id (used in event names).
+///   app:            Tauri app handle for emitting progress events.
+///   client:         Shared reqwest client for chunk 1..N requests.
+///   token:          CancellationToken — fire to pause or cancel this download.
+///   resume_offsets: Optional per-chunk snapshots from a previous paused session.
 ///
 /// Returns:
-///   Ok(()) when all chunks have been written. Err(message) if any chunk fails.
+///   Ok(LifecycleOutcome) on clean finish or pause. Err(message) if any chunk errors.
+#[allow(clippy::too_many_arguments)]
 pub async fn download_chunked(
     url: String,
     path: std::path::PathBuf,
@@ -42,13 +66,28 @@ pub async fn download_chunked(
     id: i64,
     app: tauri::AppHandle,
     client: reqwest::Client,
-) -> Result<(), String> {
+    token: CancellationToken,
+    resume_offsets: Option<Vec<ChunkSnapshot>>,
+) -> Result<LifecycleOutcome, String> {
     let chunk_count =
         ((total_size / MIN_CHUNK_BYTES) as usize).clamp(1, FREE_TIER_CHUNKS);
     let chunk_size = total_size / chunk_count as u64;
 
-    // Pre-allocate file so all chunk tasks can seek into any region
-    {
+    // Build the (start, end) plan for each chunk.
+    let chunk_plan: Vec<(u64, u64)> = (0..chunk_count)
+        .map(|i| {
+            let start = i as u64 * chunk_size;
+            let end = if i == chunk_count - 1 {
+                total_size - 1
+            } else {
+                start + chunk_size - 1
+            };
+            (start, end)
+        })
+        .collect();
+
+    // Pre-allocate file on a fresh download; on resume the file already exists with data.
+    if resume_offsets.is_none() {
         let file = std::fs::OpenOptions::new()
             .write(true)
             .create(true)
@@ -58,16 +97,39 @@ pub async fn download_chunked(
         file.set_len(total_size).map_err(|e| e.to_string())?;
     }
 
-    let total_downloaded = Arc::new(AtomicU64::new(0));
+    // Per-chunk byte counters — read after JoinSet drains to build snapshots.
+    let per_chunk_written: Vec<Arc<AtomicU64>> = (0..chunk_count)
+        .map(|i| {
+            // Pre-seed resume amounts so the global counter starts from the right baseline.
+            let initial = resume_offsets
+                .as_ref()
+                .and_then(|offsets| offsets.get(i))
+                .map(|s| s.written_bytes)
+                .unwrap_or(0);
+            Arc::new(AtomicU64::new(initial))
+        })
+        .collect();
 
-    // Background reporter — samples the counter every 200ms and emits progress events
+    // Global total_downloaded — sum of per-chunk counters, for progress events.
+    let total_downloaded = Arc::new(AtomicU64::new(
+        resume_offsets
+            .as_ref()
+            .map(|offsets| offsets.iter().map(|s| s.written_bytes).sum())
+            .unwrap_or(0),
+    ));
+
+    // Background reporter — samples the global counter every 200ms and emits progress events.
     let reporter_dl = Arc::clone(&total_downloaded);
     let reporter_app = app.clone();
+    let reporter_token = token.clone();
     let reporter = tokio::spawn(async move {
         let mut last_bytes: u64 = 0;
         let mut last_tick = Instant::now();
         loop {
-            tokio::time::sleep(Duration::from_millis(200)).await;
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_millis(200)) => {}
+                _ = reporter_token.cancelled() => break,
+            }
             let now_bytes = reporter_dl.load(Ordering::Relaxed);
             let elapsed = last_tick.elapsed().as_secs_f64();
             let speed_bps = if elapsed > 0.0 {
@@ -91,40 +153,70 @@ pub async fn download_chunked(
     });
 
     // Spawn one task per chunk.
-    // Chunk 0 reuses the probe response — no extra connection needed.
-    // Chunks 1..N-1 send Range GETs in parallel.
-    let mut set: JoinSet<Result<(), String>> = JoinSet::new();
+    let mut set: JoinSet<Result<ChunkStatus, String>> = JoinSet::new();
 
-    set.spawn(download_chunk_from_stream(
-        probe,
-        path.clone(),
-        0,
-        chunk_size,
-        Arc::clone(&total_downloaded),
-    ));
+    // Chunk 0: resume from probe response (or adjust start if resuming).
+    let chunk0_written = resume_offsets
+        .as_ref()
+        .and_then(|o| o.first())
+        .map(|s| s.written_bytes)
+        .unwrap_or(0);
+    let (chunk0_start, chunk0_end) = chunk_plan[0];
+    let chunk0_bytes_to_read = chunk0_end - chunk0_start + 1 - chunk0_written;
 
-    for i in 1..chunk_count {
-        let start = i as u64 * chunk_size;
-        let end = if i == chunk_count - 1 {
-            total_size - 1
-        } else {
-            start + chunk_size - 1
-        };
-        set.spawn(download_chunk(
-            url.clone(),
+    if chunk0_bytes_to_read > 0 {
+        set.spawn(download_chunk_from_stream(
+            probe,
             path.clone(),
-            start,
-            end,
-            client.clone(),
+            chunk0_start + chunk0_written,
+            chunk0_bytes_to_read,
             Arc::clone(&total_downloaded),
+            Arc::clone(&per_chunk_written[0]),
+            token.clone(),
         ));
+    } else {
+        // Chunk 0 already fully written — drop the probe response.
+        drop(probe);
+        set.spawn(async { Ok(ChunkStatus::Complete) });
     }
 
-    // Collect results — abort all on first failure
+    // Chunks 1..N: Range GETs, adjusted for any previously written bytes.
+    for i in 1..chunk_count {
+        let (start, end) = chunk_plan[i];
+        let already_written = resume_offsets
+            .as_ref()
+            .and_then(|o| o.get(i))
+            .map(|s| s.written_bytes)
+            .unwrap_or(0);
+        let adjusted_start = start + already_written;
+
+        if adjusted_start > end {
+            // Already complete — skip.
+            set.spawn(async { Ok(ChunkStatus::Complete) });
+        } else {
+            set.spawn(download_chunk(
+                url.clone(),
+                path.clone(),
+                adjusted_start,
+                end,
+                client.clone(),
+                Arc::clone(&total_downloaded),
+                Arc::clone(&per_chunk_written[i]),
+                token.clone(),
+            ));
+        }
+    }
+
+    // Collect results.
+    let mut any_paused = false;
     let mut first_error: Option<String> = None;
+
     while let Some(result) = set.join_next().await {
         match result {
-            Ok(Ok(())) => {}
+            Ok(Ok(ChunkStatus::Complete)) => {}
+            Ok(Ok(ChunkStatus::Paused)) => {
+                any_paused = true;
+            }
             Ok(Err(e)) => {
                 first_error = Some(e);
                 set.abort_all();
@@ -144,7 +236,23 @@ pub async fn download_chunked(
         return Err(e);
     }
 
-    // Emit a final 100% progress event
+    if any_paused {
+        // Build snapshots from chunk plan + per-chunk byte counters.
+        let snapshots: Vec<ChunkSnapshot> = chunk_plan
+            .iter()
+            .zip(per_chunk_written.iter())
+            .enumerate()
+            .map(|(i, ((start, end), written))| ChunkSnapshot {
+                chunk_idx: i,
+                start_byte: *start,
+                end_byte: *end,
+                written_bytes: written.load(Ordering::Relaxed),
+            })
+            .collect();
+        return Ok(LifecycleOutcome::Paused(snapshots));
+    }
+
+    // Emit a final 100% progress event.
     app.emit_all(
         &format!("download://progress/{id}"),
         super::ProgressPayload {
@@ -155,29 +263,34 @@ pub async fn download_chunked(
     )
     .ok();
 
-    Ok(())
+    Ok(LifecycleOutcome::Complete)
 }
 
-/// Reads exactly `bytes_to_read` bytes from an already-open response stream and
-/// writes them at `start` in the pre-allocated file. Used to pipe the probe GET
-/// response as chunk 0, avoiding a redundant TCP/TLS connection setup.
+/// Reads up to `bytes_to_read` bytes from an already-open response stream and
+/// writes them at `start` in the pre-allocated file.
+///
+/// Yields cleanly when `token` is cancelled, returning `ChunkStatus::Paused`.
 ///
 /// Args:
 ///   response:      In-flight GET response (no Range header — full file body).
 ///   path:          Pre-allocated destination file path.
-///   start:         File offset to begin writing (0 for chunk 0).
-///   bytes_to_read: Exact byte count to consume (= chunk_size for chunk 0).
-///   total_dl:      Shared atomic byte counter — incremented on each write.
+///   start:         File offset to begin writing.
+///   bytes_to_read: Exact byte count to consume.
+///   total_dl:      Shared global byte counter — incremented on each write.
+///   per_chunk_dl:  Per-chunk byte counter — incremented on each write.
+///   token:         CancellationToken — pause/cancel signal.
 ///
 /// Returns:
-///   Ok(()) on success. Err(message) on any I/O or network error.
+///   Ok(ChunkStatus) on success or pause. Err(message) on any I/O or network error.
 async fn download_chunk_from_stream(
     mut response: reqwest::Response,
     path: std::path::PathBuf,
     start: u64,
     bytes_to_read: u64,
     total_dl: Arc<AtomicU64>,
-) -> Result<(), String> {
+    per_chunk_dl: Arc<AtomicU64>,
+    token: CancellationToken,
+) -> Result<ChunkStatus, String> {
     let file = std::fs::OpenOptions::new()
         .write(true)
         .open(&path)
@@ -189,7 +302,15 @@ async fn download_chunk_from_stream(
 
     let mut remaining = bytes_to_read;
     while remaining > 0 {
-        let chunk = match response.chunk().await.map_err(|e| e.to_string())? {
+        let maybe_chunk = tokio::select! {
+            result = response.chunk() => result.map_err(|e| e.to_string())?,
+            _ = token.cancelled() => {
+                tokio::task::block_in_place(|| writer.flush().ok());
+                return Ok(ChunkStatus::Paused);
+            }
+        };
+
+        let chunk = match maybe_chunk {
             Some(c) => c,
             None => break,
         };
@@ -197,26 +318,33 @@ async fn download_chunk_from_stream(
         tokio::task::block_in_place(|| {
             writer.write_all(&chunk[..to_write]).map_err(|e| e.to_string())
         })?;
-        total_dl.fetch_add(to_write as u64, Ordering::Relaxed);
-        remaining -= to_write as u64;
+        let written = to_write as u64;
+        total_dl.fetch_add(written, Ordering::Relaxed);
+        per_chunk_dl.fetch_add(written, Ordering::Relaxed);
+        remaining -= written;
     }
 
     tokio::task::block_in_place(|| writer.flush().map_err(|e| e.to_string()))?;
-    Ok(())
+    Ok(ChunkStatus::Complete)
 }
 
 /// Fetches a single byte range and writes it to the correct offset in the file.
 ///
+/// Yields cleanly when `token` is cancelled, returning `ChunkStatus::Paused`.
+///
 /// Args:
-///   url:       The HTTP/HTTPS URL.
-///   path:      Pre-allocated destination file (must already exist).
-///   start:     First byte of the range (inclusive).
-///   end:       Last byte of the range (inclusive).
-///   client:    Shared reqwest client.
-///   total_dl:  Shared atomic byte counter — incremented on each write.
+///   url:          The HTTP/HTTPS URL.
+///   path:         Pre-allocated destination file (must already exist).
+///   start:        First byte of the range (inclusive, adjusted for resume).
+///   end:          Last byte of the range (inclusive).
+///   client:       Shared reqwest client.
+///   total_dl:     Shared global byte counter — incremented on each write.
+///   per_chunk_dl: Per-chunk byte counter — incremented on each write.
+///   token:        CancellationToken — pause/cancel signal.
 ///
 /// Returns:
-///   Ok(()) on success. Err(message) on any HTTP or I/O error.
+///   Ok(ChunkStatus) on success or pause. Err(message) on any HTTP or I/O error.
+#[allow(clippy::too_many_arguments)]
 async fn download_chunk(
     url: String,
     path: std::path::PathBuf,
@@ -224,7 +352,9 @@ async fn download_chunk(
     end: u64,
     client: reqwest::Client,
     total_dl: Arc<AtomicU64>,
-) -> Result<(), String> {
+    per_chunk_dl: Arc<AtomicU64>,
+    token: CancellationToken,
+) -> Result<ChunkStatus, String> {
     let response = client
         .get(&url)
         .header("Range", format!("bytes={start}-{end}"))
@@ -247,14 +377,27 @@ async fn download_chunk(
     })?;
 
     let mut response = response;
-    while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
+    loop {
+        let maybe_chunk = tokio::select! {
+            result = response.chunk() => result.map_err(|e| e.to_string())?,
+            _ = token.cancelled() => {
+                tokio::task::block_in_place(|| writer.flush().ok());
+                return Ok(ChunkStatus::Paused);
+            }
+        };
+
+        let chunk = match maybe_chunk {
+            Some(c) => c,
+            None => break,
+        };
         let len = chunk.len() as u64;
         tokio::task::block_in_place(|| {
             writer.write_all(&chunk).map_err(|e| e.to_string())
         })?;
         total_dl.fetch_add(len, Ordering::Relaxed);
+        per_chunk_dl.fetch_add(len, Ordering::Relaxed);
     }
 
     tokio::task::block_in_place(|| writer.flush().map_err(|e| e.to_string()))?;
-    Ok(())
+    Ok(ChunkStatus::Complete)
 }

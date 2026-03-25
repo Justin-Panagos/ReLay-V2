@@ -3,6 +3,7 @@
  * Creates, updates, and removes download cards in response to Tauri events.
  */
 
+import { invoke } from '@tauri-apps/api/tauri'
 import { open } from '@tauri-apps/api/shell'
 import { formatBytes, escHtml } from './utils.js'
 
@@ -12,33 +13,52 @@ const cardData = new Map()
 /**
  * Creates and inserts a download card into the Downloads tab.
  * Hides the empty state. Stores card metadata for speed calculation and detail panel.
+ * Wires pause, resume, and cancel button handlers.
  *
  * Args:
  *   id:          The download id from the backend.
  *   filename:    The filename being downloaded.
  *   url:         The source URL.
  *   destination: The destination directory path.
+ *   options:     Optional config — isPaused (bool) and onResume (function) for paused cards.
  */
-export function addDownloadCard(id, filename, url, destination) {
+export function addDownloadCard(id, filename, url, destination, { isPaused = false, onResume = null } = {}) {
   document.getElementById('downloads-empty').classList.add('hidden')
 
   const card = document.createElement('div')
   card.className = 'download-card'
   card.dataset.id = id
   card.innerHTML = `
-    <span class="card-type-icon status-downloading">&#8595;</span>
+    <span class="card-type-icon ${isPaused ? 'status-paused' : 'status-downloading'}">${isPaused ? '&#8759;' : '&#8595;'}</span>
     <div class="card-body">
       <div class="card-name" title="${escHtml(filename)}">${escHtml(filename)}</div>
       <div class="progress-bar"><div class="progress-fill" style="width:0%"></div></div>
       <div class="card-meta">
-        <span class="card-status">Starting&#8230;</span>
+        <span class="card-status">${isPaused ? 'Paused' : 'Starting\u2026'}</span>
         <span class="card-speed"></span>
       </div>
     </div>
     <div class="card-actions">
+      <button class="btn-icon card-pause" title="Pause" ${isPaused ? 'style="display:none"' : ''}>&#9646;&#9646;</button>
+      <button class="btn-icon card-resume" title="Resume" ${isPaused ? '' : 'style="display:none"'}>&#9654;</button>
       <button class="btn-icon card-cancel" title="Cancel">&#10005;</button>
     </div>
   `
+
+  card.querySelector('.card-pause').addEventListener('click', async (e) => {
+    e.stopPropagation()
+    try { await invoke('pause_download', { id }) } catch { /* no-op if already done */ }
+  })
+
+  card.querySelector('.card-resume').addEventListener('click', async (e) => {
+    e.stopPropagation()
+    if (onResume) onResume(id)
+  })
+
+  card.querySelector('.card-cancel').addEventListener('click', async (e) => {
+    e.stopPropagation()
+    try { await invoke('cancel_download', { id }) } catch { /* no-op if already done */ }
+  })
 
   card.addEventListener('click', () => showDetail(id))
   document.getElementById('downloads-list').prepend(card)
@@ -76,7 +96,7 @@ export function updateProgress(id, downloaded, total, speedBps) {
 }
 
 /**
- * Marks a download card as complete — green icon, hides progress bar.
+ * Marks a download card as complete — green icon, hides progress bar and action buttons.
  *
  * Args:
  *   id:   The download id.
@@ -93,6 +113,8 @@ export function setCardComplete(id, path) {
   card.querySelector('.progress-bar').style.display = 'none'
   card.querySelector('.card-status').textContent = 'Complete'
   card.querySelector('.card-speed').textContent = ''
+  card.querySelector('.card-pause').style.display = 'none'
+  card.querySelector('.card-resume').style.display = 'none'
   card.querySelector('.card-cancel').style.display = 'none'
 
   const data = cardData.get(id)
@@ -100,7 +122,7 @@ export function setCardComplete(id, path) {
 }
 
 /**
- * Marks a download card as failed — red icon, shows error message.
+ * Marks a download card as failed — red icon, shows error message, hides action buttons.
  *
  * Args:
  *   id:      The download id.
@@ -117,7 +139,50 @@ export function setCardError(id, message) {
   card.querySelector('.progress-bar').style.display = 'none'
   card.querySelector('.card-status').textContent = `Error: ${message}`
   card.querySelector('.card-speed').textContent = ''
+  card.querySelector('.card-pause').style.display = 'none'
+  card.querySelector('.card-resume').style.display = 'none'
   card.querySelector('.card-cancel').style.display = 'none'
+}
+
+/**
+ * Updates a download card to the paused state — amber icon, "Paused" status text,
+ * swaps the pause button for the resume button.
+ *
+ * Args:
+ *   id: The download id.
+ */
+export function setCardPaused(id) {
+  const card = document.querySelector(`.download-card[data-id="${id}"]`)
+  if (!card) return
+
+  const icon = card.querySelector('.card-type-icon')
+  icon.className = 'card-type-icon status-paused'
+  icon.innerHTML = '&#8759;'
+
+  card.querySelector('.card-status').textContent = 'Paused'
+  card.querySelector('.card-speed').textContent = ''
+  card.querySelector('.card-pause').style.display = 'none'
+  card.querySelector('.card-resume').style.display = ''
+}
+
+/**
+ * Updates a download card from paused back to the downloading state —
+ * restores the downloading icon and swaps resume back to pause.
+ *
+ * Args:
+ *   id: The download id.
+ */
+export function setCardResuming(id) {
+  const card = document.querySelector(`.download-card[data-id="${id}"]`)
+  if (!card) return
+
+  const icon = card.querySelector('.card-type-icon')
+  icon.className = 'card-type-icon status-downloading'
+  icon.innerHTML = '&#8595;'
+
+  card.querySelector('.card-status').textContent = 'Resuming\u2026'
+  card.querySelector('.card-pause').style.display = ''
+  card.querySelector('.card-resume').style.display = 'none'
 }
 
 /**
@@ -153,4 +218,3 @@ function showDetail(id) {
     await open(e.currentTarget.dataset.path)
   })
 }
-

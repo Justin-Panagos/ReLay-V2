@@ -1,9 +1,13 @@
 pub mod chunked;
+pub mod lifecycle;
 
 use crate::db::{self, DbState};
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::Arc;
 use tauri::Manager;
+use tokio_util::sync::CancellationToken;
 
 /// Progress payload emitted to the frontend on each reporter tick.
 #[derive(Clone, serde::Serialize)]
@@ -23,47 +27,20 @@ pub struct CompletePayload {
     pub path: String,
 }
 
-/// Payload emitted when a download fails.
+/// Payload emitted when a download fails or is cancelled.
 #[derive(Clone, serde::Serialize)]
 pub struct ErrorPayload {
     /// Human-readable error description.
     pub message: String,
 }
 
-/// Downloads a file from `url` and saves it to `destination/filename`.
-/// Dispatches to the chunked engine or single-stream fallback based on
-/// server capability. Emits Tauri events and updates the database.
+/// Payload emitted when a download is paused.
+#[derive(Clone, serde::Serialize)]
+pub struct PausedPayload {}
+
+/// Entry point for a fresh download. Registers the token/intent via the caller before spawning.
 ///
-/// Args:
-///   url:         The HTTP/HTTPS URL to download from.
-///   destination: The directory path to save the file into.
-///   filename:    The filename to use on disk.
-///   id:          The downloads table row id for DB status updates.
-///   app:         Tauri app handle — used for event emission and DB state access.
-pub async fn download_file(
-    url: String,
-    destination: String,
-    filename: String,
-    id: i64,
-    app: tauri::AppHandle,
-) {
-    let result = run_download(&url, &destination, &filename, id, &app).await;
-
-    if let Err(e) = result {
-        if let Some(state) = app.try_state::<DbState>() {
-            if let Ok(conn) = state.0.lock() {
-                db::update_download_status(&conn, id, "failed").ok();
-            }
-        }
-        app.emit_all(
-            &format!("download://error/{id}"),
-            ErrorPayload { message: e },
-        )
-        .ok();
-    }
-}
-
-/// Orchestrates the full download lifecycle: GET probe → decide strategy → execute → DB update.
+/// Orchestrates the full lifecycle: download → outcome handling → queue drain.
 ///
 /// Args:
 ///   url:         The HTTP/HTTPS URL to download from.
@@ -71,16 +48,181 @@ pub async fn download_file(
 ///   filename:    The filename to use on disk.
 ///   id:          The downloads table row id.
 ///   app:         Tauri app handle.
+///   token:       CancellationToken from the lifecycle registry.
+///   intent:      Intent flag (NONE/PAUSE/CANCEL) — set by pause/cancel commands.
+pub async fn download_file(
+    url: String,
+    destination: String,
+    filename: String,
+    id: i64,
+    app: tauri::AppHandle,
+    token: CancellationToken,
+    intent: Arc<AtomicU8>,
+) {
+    let dest_path = PathBuf::from(&destination);
+    let file_path = dest_path.join(&filename);
+
+    let outcome = run_download(&url, &destination, &filename, id, &app, token).await;
+    handle_outcome(outcome, intent, id, &file_path, &app).await;
+
+    // Clean up lifecycle registry and drain the queue.
+    if let Some(lifecycle) = app.try_state::<lifecycle::LifecycleState>() {
+        lifecycle::deregister_download(&lifecycle, id);
+    }
+    lifecycle::try_start_next(app);
+}
+
+/// Entry point for resuming a previously paused download.
+/// Loads chunk snapshots from DB and continues from the saved byte offsets.
+///
+/// Args:
+///   id:     The downloads table row id to resume.
+///   app:    Tauri app handle.
+///   token:  Fresh CancellationToken from the lifecycle registry.
+///   intent: Intent flag — set by pause/cancel commands.
+pub async fn download_file_resume(
+    id: i64,
+    app: tauri::AppHandle,
+    token: CancellationToken,
+    intent: Arc<AtomicU8>,
+) {
+    // Load record and snapshots from DB.
+    let (record, snapshots) = {
+        let db = app.try_state::<DbState>();
+        let Some(db) = db else { return };
+        let conn = db.0.lock().unwrap();
+        let record = match db::get_download_by_id(&conn, id) {
+            Ok(Some(r)) => r,
+            _ => return,
+        };
+        let snapshots = db::load_chunk_snapshots(&conn, id).unwrap_or_default();
+        (record, snapshots)
+    };
+
+    let file_path = PathBuf::from(&record.destination).join(&record.filename);
+
+    // Mark as downloading again.
+    if let Some(db) = app.try_state::<DbState>() {
+        if let Ok(conn) = db.0.lock() {
+            db::update_download_status(&conn, id, "downloading").ok();
+        }
+    }
+
+    let outcome = run_download_resume(
+        &record.url,
+        &record.destination,
+        &record.filename,
+        id,
+        &app,
+        token,
+        snapshots,
+    )
+    .await;
+    handle_outcome(outcome, intent, id, &file_path, &app).await;
+
+    if let Some(lifecycle) = app.try_state::<lifecycle::LifecycleState>() {
+        lifecycle::deregister_download(&lifecycle, id);
+    }
+    lifecycle::try_start_next(app);
+}
+
+/// Handles a `LifecycleOutcome` (or error) from `run_download` / `run_download_resume`:
+/// updates DB, emits frontend events, and cleans up on cancel.
+///
+/// Args:
+///   outcome:   The result from the download runner.
+///   intent:    Intent flag to distinguish pause from cancel when outcome is Paused.
+///   id:        The download row id.
+///   file_path: Full path to the (possibly partial) file on disk.
+///   app:       Tauri app handle.
+async fn handle_outcome(
+    outcome: Result<chunked::LifecycleOutcome, String>,
+    intent: Arc<AtomicU8>,
+    id: i64,
+    file_path: &PathBuf,
+    app: &tauri::AppHandle,
+) {
+    match outcome {
+        Ok(chunked::LifecycleOutcome::Complete) => {
+            if let Some(db) = app.try_state::<DbState>() {
+                if let Ok(conn) = db.0.lock() {
+                    db::update_download_status(&conn, id, "complete").ok();
+                    db::delete_chunk_snapshots(&conn, id).ok();
+                }
+            }
+            app.emit_all(
+                &format!("download://complete/{id}"),
+                CompletePayload {
+                    path: file_path.to_string_lossy().to_string(),
+                },
+            )
+            .ok();
+        }
+        Ok(chunked::LifecycleOutcome::Paused(snapshots)) => {
+            let intent_val = intent.load(Ordering::Relaxed);
+            if intent_val == lifecycle::intent::PAUSE {
+                if let Some(db) = app.try_state::<DbState>() {
+                    if let Ok(conn) = db.0.lock() {
+                        db::save_chunk_snapshots(&conn, id, &snapshots).ok();
+                        db::update_download_status(&conn, id, "paused").ok();
+                    }
+                }
+                app.emit_all(&format!("download://paused/{id}"), PausedPayload {})
+                    .ok();
+            } else {
+                // Cancel (or any other non-pause intent): delete file and mark failed.
+                std::fs::remove_file(file_path).ok();
+                if let Some(db) = app.try_state::<DbState>() {
+                    if let Ok(conn) = db.0.lock() {
+                        db::delete_chunk_snapshots(&conn, id).ok();
+                        db::update_download_status(&conn, id, "failed").ok();
+                    }
+                }
+                app.emit_all(
+                    &format!("download://error/{id}"),
+                    ErrorPayload {
+                        message: "Cancelled".to_string(),
+                    },
+                )
+                .ok();
+            }
+        }
+        Err(e) => {
+            if let Some(db) = app.try_state::<DbState>() {
+                if let Ok(conn) = db.0.lock() {
+                    db::delete_chunk_snapshots(&conn, id).ok();
+                    db::update_download_status(&conn, id, "failed").ok();
+                }
+            }
+            app.emit_all(
+                &format!("download://error/{id}"),
+                ErrorPayload { message: e },
+            )
+            .ok();
+        }
+    }
+}
+
+/// Orchestrates a fresh download: GET probe → decide strategy → execute.
+///
+/// Args:
+///   url:         The HTTP/HTTPS URL to download from.
+///   destination: The directory path to save the file into.
+///   filename:    The filename to use on disk.
+///   id:          The downloads table row id.
+///   app:         Tauri app handle.
+///   token:       CancellationToken for pause/cancel.
 ///
 /// Returns:
-///   Ok(()) on success, Err(message) on any failure.
+///   Ok(LifecycleOutcome) on clean finish or pause. Err(message) on failure.
 async fn run_download(
     url: &str,
     destination: &str,
     filename: &str,
     id: i64,
     app: &tauri::AppHandle,
-) -> Result<(), String> {
+    token: CancellationToken,
+) -> Result<chunked::LifecycleOutcome, String> {
     let dest_path = PathBuf::from(destination);
     std::fs::create_dir_all(&dest_path).map_err(|e| e.to_string())?;
     let file_path = dest_path.join(filename);
@@ -90,14 +232,14 @@ async fn run_download(
         .map(|s| s.inner().clone())
         .unwrap_or_else(reqwest::Client::new);
 
-    // Mark as downloading in DB
+    // Mark as downloading in DB.
     if let Some(state) = app.try_state::<DbState>() {
         if let Ok(conn) = state.0.lock() {
             db::update_download_status(&conn, id, "downloading").ok();
         }
     }
 
-    // Single GET probe — avoids a separate HEAD round-trip that some servers handle slowly
+    // Single GET probe — avoids a separate HEAD round-trip that some servers handle slowly.
     let response = client
         .get(url)
         .send()
@@ -116,7 +258,7 @@ async fn run_download(
         .map(|v| v.eq_ignore_ascii_case("bytes"))
         .unwrap_or(false);
 
-    // Store known file size in DB immediately so the history tab can show it
+    // Store known file size in DB immediately so the history tab can show it.
     if let Some(size) = content_length {
         if let Some(state) = app.try_state::<DbState>() {
             if let Ok(conn) = state.0.lock() {
@@ -125,7 +267,7 @@ async fn run_download(
         }
     }
 
-    // Use chunked only when the file is large enough to benefit from parallel chunks
+    // Use chunked only when the file is large enough to benefit from parallel chunks.
     let chunk_count = content_length
         .map(|n| {
             (n / chunked::MIN_CHUNK_BYTES)
@@ -134,38 +276,96 @@ async fn run_download(
         .unwrap_or(1);
 
     if accepts_ranges && chunk_count > 1 {
-        // Pass the probe response into the chunked engine — it becomes chunk 0.
-        // No connection teardown or reconnect needed for the first chunk.
         chunked::download_chunked(
             url.to_string(),
-            file_path.clone(),
+            file_path,
             content_length.unwrap(),
             response,
             id,
             app.clone(),
             client,
+            token,
+            None,
         )
-        .await?;
+        .await
     } else {
-        download_single(response, &file_path, content_length, id, app).await?;
+        download_single(response, &file_path, content_length, id, app, token).await
+    }
+}
+
+/// Orchestrates a resume download: reuses chunk snapshots to skip already-written data.
+///
+/// Args:
+///   url:         The HTTP/HTTPS URL to download from.
+///   destination: The directory path.
+///   filename:    The filename.
+///   id:          The download row id.
+///   app:         Tauri app handle.
+///   token:       Fresh CancellationToken.
+///   snapshots:   Per-chunk byte-offset snapshots from the paused session.
+///
+/// Returns:
+///   Ok(LifecycleOutcome) on clean finish or pause. Err(message) on failure.
+async fn run_download_resume(
+    url: &str,
+    destination: &str,
+    filename: &str,
+    id: i64,
+    app: &tauri::AppHandle,
+    token: CancellationToken,
+    snapshots: Vec<crate::db::ChunkSnapshot>,
+) -> Result<chunked::LifecycleOutcome, String> {
+    let dest_path = PathBuf::from(destination);
+    let file_path = dest_path.join(filename);
+
+    let client = app
+        .try_state::<reqwest::Client>()
+        .map(|s| s.inner().clone())
+        .unwrap_or_else(reqwest::Client::new);
+
+    if snapshots.is_empty() {
+        // No chunk snapshots — fall back to a full fresh download.
+        return run_download(url, destination, filename, id, app, token).await;
     }
 
-    // Mark complete in DB
-    if let Some(state) = app.try_state::<DbState>() {
-        if let Ok(conn) = state.0.lock() {
-            db::update_download_status(&conn, id, "complete").ok();
-        }
+    // Determine total_size from the last snapshot's end_byte.
+    let total_size = snapshots
+        .iter()
+        .map(|s| s.end_byte + 1)
+        .max()
+        .unwrap_or(0);
+
+    if total_size == 0 {
+        return run_download(url, destination, filename, id, app, token).await;
     }
 
-    app.emit_all(
-        &format!("download://complete/{id}"),
-        CompletePayload {
-            path: file_path.to_string_lossy().to_string(),
-        },
+    // Use a placeholder probe response: send a Range request for byte 0-0 as the "probe".
+    // This is the simplest approach — chunked resume for each chunk handles its own Range.
+    // We need to open a connection for chunk 0; use a small range request.
+    let probe_response = client
+        .get(url)
+        .header("Range", "bytes=0-0")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !probe_response.status().is_success() && probe_response.status().as_u16() != 206 {
+        return Err(format!("HTTP {} on resume probe", probe_response.status()));
+    }
+
+    // Pass resume_offsets to the chunked engine; it adjusts each chunk's start byte.
+    chunked::download_chunked(
+        url.to_string(),
+        file_path,
+        total_size,
+        probe_response,
+        id,
+        app.clone(),
+        client,
+        token,
+        Some(snapshots),
     )
-    .ok();
-
-    Ok(())
+    .await
 }
 
 /// Single-connection streaming download. Used when the server does not support range requests
@@ -178,29 +378,49 @@ async fn run_download(
 ///   total:    Content-Length if known from the response headers, None otherwise.
 ///   id:       The downloads table row id.
 ///   app:      Tauri app handle.
+///   token:    CancellationToken for pause/cancel.
 ///
 /// Returns:
-///   Ok(()) on success, Err(message) on any failure.
+///   Ok(LifecycleOutcome) on success or pause. Err(message) on any failure.
 async fn download_single(
     mut response: reqwest::Response,
     path: &PathBuf,
     total: Option<u64>,
     id: i64,
     app: &tauri::AppHandle,
-) -> Result<(), String> {
-    let effective_total = total;
-
+    token: CancellationToken,
+) -> Result<chunked::LifecycleOutcome, String> {
     let file = std::fs::File::create(path).map_err(|e| e.to_string())?;
     let mut writer = BufWriter::new(file);
     let mut downloaded: u64 = 0;
     let mut last_bytes: u64 = 0;
     let mut last_tick = std::time::Instant::now();
 
-    while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
+    loop {
+        let maybe_chunk = tokio::select! {
+            result = response.chunk() => result.map_err(|e| e.to_string())?,
+            _ = token.cancelled() => {
+                writer.flush().ok();
+                // Single-stream pause: emit a single-element snapshot so resume can Range-seek.
+                let snapshot = vec![crate::db::ChunkSnapshot {
+                    chunk_idx: 0,
+                    start_byte: 0,
+                    end_byte: total.unwrap_or(downloaded).saturating_sub(1),
+                    written_bytes: downloaded,
+                }];
+                return Ok(chunked::LifecycleOutcome::Paused(snapshot));
+            }
+        };
+
+        let chunk = match maybe_chunk {
+            Some(c) => c,
+            None => break,
+        };
+
         writer.write_all(&chunk).map_err(|e| e.to_string())?;
         downloaded += chunk.len() as u64;
 
-        // Rate-limit events to ~5/s to match the chunked path's reporter cadence
+        // Rate-limit events to ~5/s to match the chunked path's reporter cadence.
         if last_tick.elapsed().as_millis() >= 200 {
             let elapsed = last_tick.elapsed().as_secs_f64();
             let speed_bps = if elapsed > 0.0 {
@@ -213,7 +433,7 @@ async fn download_single(
 
             app.emit_all(
                 &format!("download://progress/{id}"),
-                ProgressPayload { downloaded, total: effective_total, speed_bps },
+                ProgressPayload { downloaded, total, speed_bps },
             )
             .ok();
         }
@@ -221,16 +441,16 @@ async fn download_single(
 
     writer.flush().map_err(|e| e.to_string())?;
 
-    // Emit final 100% event so the bar reaches 100% before the complete event hides it
-    if let Some(total_size) = effective_total {
+    // Emit final 100% event so the bar reaches 100% before the complete event hides it.
+    if let Some(total_size) = total {
         app.emit_all(
             &format!("download://progress/{id}"),
-            ProgressPayload { downloaded: total_size, total: effective_total, speed_bps: 0 },
+            ProgressPayload { downloaded: total_size, total, speed_bps: 0 },
         )
         .ok();
     }
 
-    Ok(())
+    Ok(chunked::LifecycleOutcome::Complete)
 }
 
 /// Extracts a filename from a URL by taking the last path segment

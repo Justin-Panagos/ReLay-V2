@@ -211,6 +211,7 @@
 
 /* Status colours */
 .status-downloading { color: var(--accent); }
+.status-paused      { color: var(--accent-amber); }
 .status-scanning    { color: var(--accent-amber); }
 .status-complete    { color: var(--accent-green); }
 .status-error       { color: var(--accent-red); }

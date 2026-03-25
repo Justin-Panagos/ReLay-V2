@@ -10,6 +10,8 @@ mod shield;
 mod torrent;
 
 use db::DbState;
+use download::lifecycle::{LifecycleState, QueueState};
+use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 use tauri::Manager;
 
@@ -29,6 +31,8 @@ fn main() {
                     .expect("failed to build HTTP client"),
             );
             app.manage(DbState(Mutex::new(conn)));
+            app.manage(LifecycleState(Mutex::new(HashMap::new())));
+            app.manage(QueueState(Mutex::new(VecDeque::new())));
 
             Ok(())
         })
@@ -38,6 +42,9 @@ fn main() {
             commands::download::start_download,
             commands::download::get_downloads,
             commands::download::reset_stale_downloads,
+            commands::download::pause_download,
+            commands::download::resume_download,
+            commands::download::cancel_download,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ReLay");
