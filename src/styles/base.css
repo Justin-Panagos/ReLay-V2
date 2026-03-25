@@ -1,0 +1,57 @@
+/* CSS reset */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* Custom properties — light mode */
+:root {
+  --bg:             #ffffff;
+  --bg-secondary:   #f4f4f5;
+  --bg-tertiary:    #e4e4e7;
+  --text:           #18181b;
+  --text-muted:     #71717a;
+  --border:         #e4e4e7;
+  --accent:         #7c3aed;
+  --accent-amber:   #d97706;
+  --accent-green:   #059669;
+  --accent-red:     #dc2626;
+  --radius:         6px;
+}
+
+/* Dark mode overrides */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:           #1a1a1a;
+    --bg-secondary: #242424;
+    --bg-tertiary:  #303030;
+    --text:         #f4f4f5;
+    --text-muted:   #71717a;
+    --border:       #303030;
+    --accent:       #8b5cf6;
+    --accent-amber: #f59e0b;
+    --accent-green: #10b981;
+    --accent-red:   #ef4444;
+  }
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+/* Thin scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 99px;
+}

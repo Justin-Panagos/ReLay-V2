@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self' tauri: ipc:; script-src 'self'; style-src 'self' 'unsafe-inline';" />
+  <title>ReLay</title>
+  <link rel="stylesheet" href="/styles/base.css" />
+  <link rel="stylesheet" href="/styles/components.css" />
+  <link rel="stylesheet" href="/styles/tabs.css" />
+</head>
+<body>
+  <div id="app">
+
+    <!-- Main panel -->
+    <div id="main-panel">
+
+      <!-- App bar -->
+      <header id="app-bar">
+        <span id="app-title">ReLay</span>
+        <div id="app-bar-actions">
+          <button class="btn-icon" id="menu-btn" title="Menu">&#8801;</button>
+          <button class="btn-icon" id="expand-btn" title="Expand panel">+</button>
+        </div>
+      </header>
+
+      <!-- URL input area -->
+      <div id="input-area">
+        <input id="url-input" type="text" placeholder="Paste or drop URL..." />
+        <div id="input-actions">
+          <button id="folder-btn">Browse...</button>
+          <button id="start-btn">Start</button>
+        </div>
+      </div>
+
+      <!-- Tab bar -->
+      <nav id="tab-bar">
+        <button class="tab active" data-tab="downloads">Downloads</button>
+        <button class="tab" data-tab="history">History</button>
+        <button class="tab" data-tab="torrent">Torrent</button>
+        <button class="tab" data-tab="quarantine">Shield</button>
+        <button class="tab" data-tab="settings">Settings</button>
+      </nav>
+
+      <!-- Tab content -->
+      <div id="tab-content">
+
+        <div id="tab-downloads" class="tab-pane active">
+          <div id="pro-prompt" class="pro-prompt hidden">
+            <span>Free plan: 1 download at a time.</span>
+            <button class="pro-prompt-upgrade">Upgrade to Pro</button>
+            <button class="pro-prompt-dismiss">&#10005;</button>
+          </div>
+          <div id="downloads-list">
+            <div class="empty-state" id="downloads-empty">No active downloads</div>
+          </div>
+        </div>
+
+        <div id="tab-history" class="tab-pane">
+          <div id="history-list">
+            <div class="empty-state">No download history yet</div>
+          </div>
+        </div>
+
+        <div id="tab-torrent" class="tab-pane">
+          <div class="empty-state">Drop a .torrent file here or paste a magnet link above</div>
+        </div>
+
+        <div id="tab-quarantine" class="tab-pane">
+          <div class="empty-state">No threats detected</div>
+        </div>
+
+        <div id="tab-settings" class="tab-pane">
+          <div class="empty-state">Settings &#8212; coming soon</div>
+        </div>
+
+      </div><!-- /tab-content -->
+    </div><!-- /main-panel -->
+
+    <!-- Resize handle (hidden until expanded) -->
+    <div id="panel-slider" class="hidden"></div>
+
+    <!-- Right detail panel (hidden until expanded) -->
+    <div id="detail-panel" class="hidden">
+      <div class="detail-header">Detail</div>
+      <div class="detail-body">
+        <p>Select a download to see details</p>
+      </div>
+    </div>
+
+  </div><!-- /app -->
+  <script type="module" src="/scripts/main.js"></script>
+</body>
+</html>
