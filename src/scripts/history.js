@@ -4,6 +4,7 @@
 
 import { invoke } from '@tauri-apps/api/tauri'
 import { open } from '@tauri-apps/api/shell'
+import { formatBytes, escHtml } from './utils.js'
 
 /**
  * Loads recent downloads from the database and renders them in the History tab.
@@ -75,22 +76,6 @@ function renderHistoryCard(record) {
 }
 
 /**
- * Formats a byte count into a human-readable string (B, KB, MB, GB).
- *
- * Args:
- *   bytes: Number of bytes.
- *
- * Returns:
- *   Formatted string like "4.2 MB".
- */
-function formatBytes(bytes) {
-  if (bytes < 1024) return `${Math.round(bytes)} B`
-  if (bytes < 1_048_576) return `${(bytes / 1024).toFixed(1)} KB`
-  if (bytes < 1_073_741_824) return `${(bytes / 1_048_576).toFixed(1)} MB`
-  return `${(bytes / 1_073_741_824).toFixed(2)} GB`
-}
-
-/**
  * Formats a timestamp from the database into a short human-readable date+time.
  * Handles both Unix seconds (numeric string) and ISO date strings.
  *
@@ -112,19 +97,3 @@ function formatDate(ts) {
   })
 }
 
-/**
- * Escapes a string for safe insertion into HTML attribute values or text content.
- *
- * Args:
- *   str: The string to escape.
- *
- * Returns:
- *   HTML-safe string.
- */
-function escHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-}

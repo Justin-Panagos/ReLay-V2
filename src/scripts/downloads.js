@@ -4,8 +4,9 @@
  */
 
 import { open } from '@tauri-apps/api/shell'
+import { formatBytes, escHtml } from './utils.js'
 
-/** @type {Map<number, { url: string, filename: string, destination: string, lastBytes: number, lastTime: number, path?: string }>} */
+/** @type {Map<number, { url: string, filename: string, destination: string, path?: string }>} */
 const cardData = new Map()
 
 /**
@@ -41,42 +42,37 @@ export function addDownloadCard(id, filename, url, destination) {
 
   card.addEventListener('click', () => showDetail(id))
   document.getElementById('downloads-list').prepend(card)
-  cardData.set(id, { url, filename, destination, lastBytes: 0, lastTime: Date.now() })
+  cardData.set(id, { url, filename, destination })
 }
 
 /**
  * Updates the progress bar, status text, and speed display for a download card.
+ * Speed is provided directly by the backend — no client-side delta calculation needed.
  *
  * Args:
  *   id:         The download id.
  *   downloaded: Total bytes received so far.
  *   total:      Total file size in bytes, or null if unknown.
+ *   speedBps:   Current download speed in bytes per second from the backend.
  */
-export function updateProgress(id, downloaded, total) {
+export function updateProgress(id, downloaded, total, speedBps) {
   const card = document.querySelector(`.download-card[data-id="${id}"]`)
   if (!card) return
-
-  const data = cardData.get(id)
-  if (!data) return
-
-  const now = Date.now()
-  const elapsed = (now - data.lastTime) / 1000
-  const speed = elapsed > 0 ? (downloaded - data.lastBytes) / elapsed : 0
-  data.lastBytes = downloaded
-  data.lastTime = now
 
   const fill = card.querySelector('.progress-fill')
   const statusEl = card.querySelector('.card-status')
   const speedEl = card.querySelector('.card-speed')
 
   if (total) {
-    const pct = Math.round((downloaded / total) * 100)
-    fill.style.width = `${pct}%`
-    statusEl.textContent = `${pct}% of ${formatBytes(total)}`
+    fill.classList.remove('progress-fill--indeterminate')
+    fill.style.width = `${Math.round((downloaded / total) * 100)}%`
+    statusEl.textContent = `${Math.round((downloaded / total) * 100)}% of ${formatBytes(total)}`
   } else {
+    fill.style.width = ''
+    fill.classList.add('progress-fill--indeterminate')
     statusEl.textContent = formatBytes(downloaded)
   }
-  speedEl.textContent = speed > 100 ? `\u2193 ${formatBytes(speed)}/s` : ''
+  speedEl.textContent = speedBps > 1024 ? `\u2193 ${formatBytes(speedBps)}/s` : ''
 }
 
 /**
@@ -158,35 +154,3 @@ function showDetail(id) {
   })
 }
 
-/**
- * Formats a byte count into a human-readable string (B, KB, MB, GB).
- *
- * Args:
- *   bytes: Number of bytes.
- *
- * Returns:
- *   Formatted string like "4.2 MB".
- */
-function formatBytes(bytes) {
-  if (bytes < 1024) return `${Math.round(bytes)} B`
-  if (bytes < 1_048_576) return `${(bytes / 1024).toFixed(1)} KB`
-  if (bytes < 1_073_741_824) return `${(bytes / 1_048_576).toFixed(1)} MB`
-  return `${(bytes / 1_073_741_824).toFixed(2)} GB`
-}
-
-/**
- * Escapes a string for safe insertion into HTML attribute values or text content.
- *
- * Args:
- *   str: The string to escape.
- *
- * Returns:
- *   HTML-safe string.
- */
-function escHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-}

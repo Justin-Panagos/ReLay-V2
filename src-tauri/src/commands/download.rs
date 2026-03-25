@@ -75,10 +75,5 @@ pub fn get_downloads(
 #[tauri::command]
 pub fn reset_stale_downloads(state: State<'_, DbState>) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    conn.execute(
-        "UPDATE downloads SET status = 'failed' WHERE status IN ('downloading', 'queued')",
-        [],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
+    db::reset_stale_downloads(&conn).map_err(|e| e.to_string())
 }

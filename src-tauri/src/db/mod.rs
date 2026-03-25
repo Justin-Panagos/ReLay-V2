@@ -125,8 +125,6 @@ pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<()> {
 }
 
 /// A single row from the downloads table, serialisable for Tauri commands.
-// These functions are used starting Phase 2 — suppress dead_code until then.
-#[allow(dead_code)]
 #[derive(Debug, Serialize)]
 pub struct DownloadRecord {
     pub id: i64,
@@ -140,7 +138,6 @@ pub struct DownloadRecord {
     pub completed_at: Option<String>,
 }
 
-#[allow(dead_code)]
 /// Inserts a new download row with status `queued` and returns its id.
 ///
 /// Args:
@@ -166,22 +163,59 @@ pub fn insert_download(
     Ok(conn.last_insert_rowid())
 }
 
-#[allow(dead_code)]
 /// Updates the status field of a download row.
+/// Also sets `completed_at` to the current Unix timestamp when status is "complete".
 ///
 /// Args:
 ///   conn:   Open database connection.
 ///   id:     The download row id.
 ///   status: New status string (queued|downloading|paused|complete|failed|quarantined).
 pub fn update_download_status(conn: &Connection, id: i64, status: &str) -> Result<()> {
+    if status == "complete" {
+        conn.execute(
+            "UPDATE downloads SET status = ?1, completed_at = ?2 WHERE id = ?3",
+            rusqlite::params![status, unix_now(), id],
+        )?;
+    } else {
+        conn.execute(
+            "UPDATE downloads SET status = ?1 WHERE id = ?2",
+            rusqlite::params![status, id],
+        )?;
+    }
+    Ok(())
+}
+
+/// Resets all in-progress downloads to `failed`.
+/// Called on app startup to clean up downloads interrupted by a previous crash or close.
+///
+/// Args:
+///   conn: Open database connection.
+pub fn reset_stale_downloads(conn: &Connection) -> Result<()> {
     conn.execute(
-        "UPDATE downloads SET status = ?1 WHERE id = ?2",
-        rusqlite::params![status, id],
+        "UPDATE downloads SET status = 'failed' WHERE status IN ('downloading', 'queued')",
+        [],
     )?;
     Ok(())
 }
 
-#[allow(dead_code)]
+/// Sets the size_bytes field for a download row.
+/// Called after a successful HEAD request reveals Content-Length.
+///
+/// Args:
+///   conn:       Active SQLite connection.
+///   id:         The download row id.
+///   size_bytes: Total file size in bytes.
+///
+/// Returns:
+///   Ok(()) on success.
+pub fn update_download_size(conn: &Connection, id: i64, size_bytes: u64) -> Result<()> {
+    conn.execute(
+        "UPDATE downloads SET size_bytes = ?1 WHERE id = ?2",
+        rusqlite::params![size_bytes as i64, id],
+    )?;
+    Ok(())
+}
+
 /// Returns the most recent download rows ordered by created_at descending.
 ///
 /// Args:

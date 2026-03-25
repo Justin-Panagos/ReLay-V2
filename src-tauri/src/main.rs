@@ -22,6 +22,12 @@ fn main() {
                 .expect("could not resolve app data dir");
 
             let conn = db::init_db(dir).expect("failed to initialise database");
+            app.manage(
+                reqwest::Client::builder()
+                    .connect_timeout(std::time::Duration::from_secs(10))
+                    .build()
+                    .expect("failed to build HTTP client"),
+            );
             app.manage(DbState(Mutex::new(conn)));
 
             Ok(())

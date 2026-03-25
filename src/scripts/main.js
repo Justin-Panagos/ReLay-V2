@@ -48,6 +48,10 @@ async function startDownload(url) {
   }
   proPrompt.classList.add('hidden')
 
+  // Fetch metadata before starting — avoids async gap between start_download and listen()
+  const filename = url.split('/').filter(Boolean).pop()?.split('?')[0] || 'download'
+  const destination = (await invoke('get_setting', { key: 'default_folder' })) ?? ''
+
   let id
   try {
     id = await invoke('start_download', { url })
@@ -56,15 +60,11 @@ async function startDownload(url) {
     return
   }
 
-  // Derive filename client-side to match what the backend stored
-  const filename = url.split('/').filter(Boolean).pop()?.split('?')[0] || 'download'
-  const destination = (await invoke('get_setting', { key: 'default_folder' })) ?? ''
-
   activeDownloads.add(id)
   addDownloadCard(id, filename, url, destination)
 
   const unlistenProgress = await listen(`download://progress/${id}`, (e) => {
-    updateProgress(id, e.payload.downloaded, e.payload.total ?? null)
+    updateProgress(id, e.payload.downloaded, e.payload.total ?? null, e.payload.speed_bps ?? 0)
   })
 
   const unlistenComplete = await listen(`download://complete/${id}`, async (e) => {
