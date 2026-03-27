@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "canisters": {
+    "pattern":    { "type": "rust", "candid": "pattern/pattern.did",       "package": "pattern"    },
+    "governance": { "type": "rust", "candid": "governance/governance.did", "package": "governance" },
+    "identity":   { "type": "rust", "candid": "identity/identity.did",     "package": "identity"   },
+    "update":     { "type": "rust", "candid": "update/update.did",         "package": "update"     }
+  },
+  "defaults": { "build": { "args": "", "packtool": "" } },
+  "networks": {
+    "local": { "bind": "127.0.0.1:4943", "type": "ephemeral" }
+  }
+}

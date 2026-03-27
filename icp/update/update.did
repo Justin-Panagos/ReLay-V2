@@ -1,0 +1,20 @@
+service : {
+  // Returns the changelog text for the latest version.
+  // Returns an empty string if no version has been set yet.
+  // 
+  // Returns:
+  // text — changelog markdown or plain text, or "" if unset.
+  get_changelog : () -> (text) query;
+  // Returns the latest published app version string (e.g. "0.1.0").
+  // Returns an empty string if no version has been set yet.
+  // 
+  // Returns:
+  // text — semver version string, or "" if unset.
+  get_latest_version : () -> (text) query;
+  // Publishes a new app version and its changelog.
+  // 
+  // Args:
+  // version:   Semver string (e.g. "0.2.0").
+  // changelog: Release notes or change description.
+  set_version : (text, text) -> ();
+}

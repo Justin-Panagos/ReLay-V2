@@ -1,0 +1,14 @@
+/Users/justinpanagos/projects/ReLay/icp/target/release/deps/serde-ea1737d6322f0403.d: /Users/justinpanagos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/justinpanagos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/justinpanagos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/justinpanagos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/justinpanagos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/justinpanagos/projects/ReLay/icp/target/release/build/serde-98e70a625c19e3bc/out/private.rs
+
+/Users/justinpanagos/projects/ReLay/icp/target/release/deps/libserde-ea1737d6322f0403.rlib: /Users/justinpanagos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/justinpanagos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/justinpanagos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/justinpanagos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/justinpanagos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/justinpanagos/projects/ReLay/icp/target/release/build/serde-98e70a625c19e3bc/out/private.rs
+
+/Users/justinpanagos/projects/ReLay/icp/target/release/deps/libserde-ea1737d6322f0403.rmeta: /Users/justinpanagos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/justinpanagos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/justinpanagos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/justinpanagos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/justinpanagos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/justinpanagos/projects/ReLay/icp/target/release/build/serde-98e70a625c19e3bc/out/private.rs
+
+/Users/justinpanagos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs:
+/Users/justinpanagos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs:
+/Users/justinpanagos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs:
+/Users/justinpanagos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:
+/Users/justinpanagos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs:
+/Users/justinpanagos/projects/ReLay/icp/target/release/build/serde-98e70a625c19e3bc/out/private.rs:
+
+# env-dep:OUT_DIR=/Users/justinpanagos/projects/ReLay/icp/target/release/build/serde-98e70a625c19e3bc/out

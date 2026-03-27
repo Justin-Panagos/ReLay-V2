@@ -1,0 +1,53 @@
+// A community proposal to flag a file hash as a threat.
+type Proposal = record {
+  // Auto-assigned sequential id.
+  id : nat64;
+  // Current status: "pending" | "approved" | "rejected".
+  status : text;
+  // Hex-encoded SHA-256 hash under review.
+  sha256 : text;
+  // Number of reject votes cast so far.
+  reject_votes : nat64;
+  // device_id of the submitter.
+  submitter : text;
+  // Unix nanoseconds of submission time.
+  created_at : nat64;
+  // Number of approve votes cast so far.
+  approve_votes : nat64;
+};
+service : {
+  // Returns all proposals in the order they were submitted.
+  // 
+  // Returns:
+  // vec Proposal — all proposals, sorted by id ascending.
+  get_proposals : () -> (vec Proposal) query;
+  // Returns the reputation score for a device.
+  // Returns 0 for unknown devices.
+  // 
+  // Args:
+  // device_id: The device whose reputation to look up.
+  // 
+  // Returns:
+  // nat64 — accumulated reputation points.
+  get_reputation : (text) -> (nat64) query;
+  // Submits a hash for community review and returns the new proposal id.
+  // Rewards the submitter with +1 reputation.
+  // 
+  // Args:
+  // sha256:    Hex-encoded SHA-256 hash of the file to review.
+  // submitter: device_id of the submitting user.
+  // 
+  // Returns:
+  // nat64 — id of the newly created proposal.
+  submit_proposal : (text, text) -> (nat64);
+  // Casts a vote on a pending proposal.
+  // Silently ignores duplicate votes from the same voter on the same proposal.
+  // Auto-resolves the proposal when approve or reject votes reach VOTE_THRESHOLD.
+  // Rewards the voter with +1 reputation.
+  // 
+  // Args:
+  // proposal_id: Id of the proposal to vote on.
+  // voter:       device_id of the voting user.
+  // approve:     true to approve, false to reject.
+  vote : (nat64, text, bool) -> ();
+}

@@ -1,0 +1,31 @@
+// Licence status returned by check_licence.
+// Free: no active subscription.
+// Pro:  active subscription with an expiry timestamp (Unix seconds).
+type LicenceStatus = variant {
+  Pro : record { expiry_timestamp : nat64 };
+  Free;
+};
+service : {
+  // Returns the licence status for the given device id.
+  // A missing or zero-valued entry is treated as Free.
+  // 
+  // Args:
+  // device_id: The device's unique identifier string.
+  // 
+  // Returns:
+  // LicenceStatus — Free or Pro { expiry_timestamp }.
+  check_licence : (text) -> (LicenceStatus) query;
+  // Grants a Pro licence to the specified device until expiry_timestamp.
+  // FIXME(Phase-12): add controller-only caller check before mainnet deployment.
+  // 
+  // Args:
+  // device_id:        The device's unique identifier string.
+  // expiry_timestamp: Unix seconds at which the Pro licence expires.
+  grant_pro : (text, nat64) -> ();
+  // Registers a device on the Free tier.
+  // Does nothing if the device_id is already registered.
+  // 
+  // Args:
+  // device_id: The device's unique identifier string.
+  register_device : (text) -> ();
+}

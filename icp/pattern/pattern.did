@@ -1,0 +1,48 @@
+// A single entry in the pattern ledger.
+// Stored in stable memory via Candid encoding so upgrades preserve all data.
+type PatternEntry = record {
+  // Sequential id equal to the entry's index in the ledger.
+  id : nat64;
+  // Hex-encoded SHA-256 hash of the file.
+  sha256 : text;
+  // Submitter device_id or "community".
+  source : text;
+  // Unix nanoseconds from ic_cdk::api::time().
+  timestamp : nat64;
+  // Threat severity: "low" | "medium" | "high" | "critical".
+  threat_level : text;
+};
+service : {
+  // Returns all entries appended after `since_id` (exclusive).
+  // Used by the Phase 11 twelve-hour sync loop to fetch only new entries.
+  // 
+  // Args:
+  // since_id: The last id the caller already has. Pass 0 on first sync.
+  // 
+  // Returns:
+  // vec PatternEntry — entries with id > since_id, in ascending order.
+  get_delta_since : (nat64) -> (vec PatternEntry) query;
+  // Returns the SHA-256 hash of the most recently appended entry.
+  // Returns an empty string if the ledger has no entries.
+  // 
+  // Returns:
+  // text — SHA-256 hex string of the latest entry, or "" if empty.
+  get_latest_hash : () -> (text) query;
+  // Returns the id of the most recently appended pattern entry.
+  // Returns 0 if the ledger is empty (safe default for delta sync seed).
+  // 
+  // Returns:
+  // nat64 — id of the last entry, or 0 if the ledger has no entries.
+  get_latest_id : () -> (nat64) query;
+  // Appends a new pattern entry to the ledger and returns its assigned id.
+  // NOTE: no caller check in Phase 10 — Phase 13 will add an API key gate.
+  // 
+  // Args:
+  // sha256:       Hex-encoded SHA-256 hash of the flagged file.
+  // threat_level: Severity string ("low" | "medium" | "high" | "critical").
+  // source:       Submitter identifier or "community".
+  // 
+  // Returns:
+  // nat64 — the id assigned to the new entry.
+  submit_pattern : (text, text, text) -> (nat64);
+}
