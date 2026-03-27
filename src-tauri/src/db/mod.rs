@@ -42,6 +42,28 @@ fn migrations() -> Migrations<'static> {
                 written_bytes INTEGER NOT NULL DEFAULT 0
             );",
         ),
+        // v3 — torrent support
+        M::up(
+            "ALTER TABLE downloads ADD COLUMN type TEXT NOT NULL DEFAULT 'http';
+            ALTER TABLE downloads ADD COLUMN torrent_id INTEGER;",
+        ),
+        // v4 — shield scanning results and quarantine
+        M::up(
+            "ALTER TABLE downloads ADD COLUMN sha256 TEXT;
+            ALTER TABLE downloads ADD COLUMN scan_threat TEXT;
+            CREATE TABLE quarantine (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                download_id      INTEGER NOT NULL,
+                sha256           TEXT NOT NULL,
+                filename         TEXT NOT NULL,
+                original_path    TEXT NOT NULL,
+                quarantine_path  TEXT NOT NULL,
+                threat_reason    TEXT NOT NULL,
+                quarantined_at   TEXT NOT NULL
+            );",
+        ),
+        // v5 — sandbox scan report (Layer 7, Pro)
+        M::up("ALTER TABLE downloads ADD COLUMN sandbox_report TEXT;"),
     ])
 }
 
@@ -149,6 +171,11 @@ pub struct DownloadRecord {
     pub created_at: String,
     pub completed_at: Option<String>,
     pub paused_at: Option<String>,
+    pub type_: String,
+    pub torrent_id: Option<i64>,
+    pub sha256: Option<String>,
+    pub scan_threat: Option<String>,
+    pub sandbox_report: Option<String>,
 }
 
 /// Per-chunk byte-offset snapshot used to resume a paused chunked download.
@@ -254,7 +281,8 @@ pub fn update_download_size(conn: &Connection, id: i64, size_bytes: u64) -> Resu
 pub fn get_recent_downloads(conn: &Connection, limit: i64) -> Result<Vec<DownloadRecord>> {
     let mut stmt = conn.prepare(
         "SELECT id, url, filename, destination, status,
-                size_bytes, downloaded_bytes, created_at, completed_at, paused_at
+                size_bytes, downloaded_bytes, created_at, completed_at, paused_at,
+                type, torrent_id, sha256, scan_threat, sandbox_report
          FROM downloads
          ORDER BY created_at DESC
          LIMIT ?1",
@@ -272,6 +300,11 @@ pub fn get_recent_downloads(conn: &Connection, limit: i64) -> Result<Vec<Downloa
             created_at: row.get(7)?,
             completed_at: row.get(8)?,
             paused_at: row.get(9)?,
+            type_: row.get(10)?,
+            torrent_id: row.get(11)?,
+            sha256: row.get(12)?,
+            scan_threat: row.get(13)?,
+            sandbox_report: row.get(14)?,
         })
     })?;
 
@@ -289,7 +322,8 @@ pub fn get_recent_downloads(conn: &Connection, limit: i64) -> Result<Vec<Downloa
 pub fn get_download_by_id(conn: &Connection, id: i64) -> Result<Option<DownloadRecord>> {
     let mut stmt = conn.prepare(
         "SELECT id, url, filename, destination, status,
-                size_bytes, downloaded_bytes, created_at, completed_at, paused_at
+                size_bytes, downloaded_bytes, created_at, completed_at, paused_at,
+                type, torrent_id, sha256, scan_threat, sandbox_report
          FROM downloads WHERE id = ?1",
     )?;
 
@@ -305,6 +339,11 @@ pub fn get_download_by_id(conn: &Connection, id: i64) -> Result<Option<DownloadR
             created_at: row.get(7)?,
             completed_at: row.get(8)?,
             paused_at: row.get(9)?,
+            type_: row.get(10)?,
+            torrent_id: row.get(11)?,
+            sha256: row.get(12)?,
+            scan_threat: row.get(13)?,
+            sandbox_report: row.get(14)?,
         })
     })?;
 
@@ -384,6 +423,239 @@ pub fn delete_chunk_snapshots(conn: &Connection, download_id: i64) -> Result<()>
     conn.execute(
         "DELETE FROM chunk_offsets WHERE download_id = ?1",
         [download_id],
+    )?;
+    Ok(())
+}
+
+/// Inserts a new torrent row with status `queued` and `type = 'torrent'` and returns its id.
+///
+/// Args:
+///   conn:        Open database connection.
+///   url:         The magnet link or .torrent file path used to identify the torrent.
+///   filename:    Display name (torrent name, may be "Resolving..." initially).
+///   destination: The destination directory path.
+///
+/// Returns:
+///   The auto-assigned row id of the new torrent download.
+pub fn insert_torrent(
+    conn: &Connection,
+    url: &str,
+    filename: &str,
+    destination: &str,
+) -> Result<i64> {
+    let now = unix_now();
+    conn.execute(
+        "INSERT INTO downloads (url, filename, destination, status, type, created_at)
+         VALUES (?1, ?2, ?3, 'queued', 'torrent', ?4)",
+        rusqlite::params![url, filename, destination, now],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Writes the librqbit-assigned numeric torrent id to a torrent row.
+/// Called after the librqbit Session returns a TorrentId for a newly added torrent.
+///
+/// Args:
+///   conn:       Open database connection.
+///   id:         The download table row id.
+///   torrent_id: The librqbit TorrentId (stored as i64).
+pub fn update_torrent_id(conn: &Connection, id: i64, torrent_id: usize) -> Result<()> {
+    conn.execute(
+        "UPDATE downloads SET torrent_id = ?1 WHERE id = ?2",
+        rusqlite::params![torrent_id as i64, id],
+    )?;
+    Ok(())
+}
+
+/// Updates the downloaded_bytes and size_bytes fields for any download row.
+/// Called by the torrent progress poller on each tick.
+///
+/// Args:
+///   conn:             Open database connection.
+///   id:               The download row id.
+///   downloaded_bytes: Bytes downloaded so far.
+///   size_bytes:       Total file size in bytes (0 if unknown).
+pub fn update_downloaded_bytes(
+    conn: &Connection,
+    id: i64,
+    downloaded_bytes: u64,
+    size_bytes: u64,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE downloads SET downloaded_bytes = ?1, size_bytes = ?2 WHERE id = ?3",
+        rusqlite::params![downloaded_bytes as i64, size_bytes as i64, id],
+    )?;
+    Ok(())
+}
+
+/// Returns torrent rows (type = 'torrent') ordered by created_at descending.
+///
+/// Args:
+///   conn:  Open database connection.
+///   limit: Maximum number of rows to return.
+///
+/// Returns:
+///   Vec of DownloadRecord structs ordered newest-first.
+pub fn get_torrents(conn: &Connection, limit: i64) -> Result<Vec<DownloadRecord>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, url, filename, destination, status,
+                size_bytes, downloaded_bytes, created_at, completed_at, paused_at,
+                type, torrent_id, sha256, scan_threat, sandbox_report
+         FROM downloads
+         WHERE type = 'torrent'
+         ORDER BY created_at DESC
+         LIMIT ?1",
+    )?;
+
+    let rows = stmt.query_map([limit], |row| {
+        Ok(DownloadRecord {
+            id: row.get(0)?,
+            url: row.get(1)?,
+            filename: row.get(2)?,
+            destination: row.get(3)?,
+            status: row.get(4)?,
+            size_bytes: row.get(5)?,
+            downloaded_bytes: row.get(6)?,
+            created_at: row.get(7)?,
+            completed_at: row.get(8)?,
+            paused_at: row.get(9)?,
+            type_: row.get(10)?,
+            torrent_id: row.get(11)?,
+            sha256: row.get(12)?,
+            scan_threat: row.get(13)?,
+            sandbox_report: row.get(14)?,
+        })
+    })?;
+
+    rows.collect()
+}
+
+/// A single row from the quarantine table, serialisable for Tauri commands.
+#[derive(Debug, Serialize)]
+pub struct QuarantineRecord {
+    pub id: i64,
+    pub download_id: i64,
+    pub sha256: String,
+    pub filename: String,
+    pub original_path: String,
+    pub quarantine_path: String,
+    pub threat_reason: String,
+    pub quarantined_at: String,
+}
+
+/// Inserts a new quarantine row and returns its id.
+///
+/// Args:
+///   conn:           Open database connection.
+///   download_id:    The downloads table row id.
+///   sha256:         Hex-encoded SHA-256 hash of the file.
+///   filename:       The file's name.
+///   original_path:  Full path where the file was originally saved.
+///   quarantine_path: Full path to the file's current quarantine location.
+///   threat_reason:  Human-readable description of why the file was quarantined.
+///
+/// Returns:
+///   The auto-assigned row id of the new quarantine entry.
+pub fn insert_quarantine(
+    conn: &Connection,
+    download_id: i64,
+    sha256: &str,
+    filename: &str,
+    original_path: &str,
+    quarantine_path: &str,
+    threat_reason: &str,
+) -> Result<i64> {
+    let now = unix_now();
+    conn.execute(
+        "INSERT INTO quarantine
+            (download_id, sha256, filename, original_path, quarantine_path, threat_reason, quarantined_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        rusqlite::params![download_id, sha256, filename, original_path, quarantine_path, threat_reason, now],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Returns quarantine rows ordered by quarantined_at descending.
+///
+/// Args:
+///   conn:  Open database connection.
+///   limit: Maximum number of rows to return.
+///
+/// Returns:
+///   Vec of QuarantineRecord structs ordered newest-first.
+pub fn get_quarantine(conn: &Connection, limit: i64) -> Result<Vec<QuarantineRecord>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, download_id, sha256, filename, original_path, quarantine_path, threat_reason, quarantined_at
+         FROM quarantine
+         ORDER BY quarantined_at DESC
+         LIMIT ?1",
+    )?;
+
+    let rows = stmt.query_map([limit], |row| {
+        Ok(QuarantineRecord {
+            id: row.get(0)?,
+            download_id: row.get(1)?,
+            sha256: row.get(2)?,
+            filename: row.get(3)?,
+            original_path: row.get(4)?,
+            quarantine_path: row.get(5)?,
+            threat_reason: row.get(6)?,
+            quarantined_at: row.get(7)?,
+        })
+    })?;
+
+    rows.collect()
+}
+
+/// Deletes a single quarantine row by its id.
+/// Does NOT delete the file on disk — use the command layer for that.
+///
+/// Args:
+///   conn: Open database connection.
+///   id:   The quarantine table row id.
+pub fn delete_quarantine_entry(conn: &Connection, id: i64) -> Result<()> {
+    conn.execute("DELETE FROM quarantine WHERE id = ?1", [id])?;
+    Ok(())
+}
+
+/// Stores the hex-encoded SHA-256 hash for a download row.
+///
+/// Args:
+///   conn:   Open database connection.
+///   id:     The download row id.
+///   sha256: Hex-encoded SHA-256 digest string.
+pub fn update_download_sha256(conn: &Connection, id: i64, sha256: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE downloads SET sha256 = ?1 WHERE id = ?2",
+        rusqlite::params![sha256, id],
+    )?;
+    Ok(())
+}
+
+/// Stores the threat reason string for a quarantined download row.
+///
+/// Args:
+///   conn:   Open database connection.
+///   id:     The download row id.
+///   reason: Human-readable threat description.
+pub fn update_download_scan_threat(conn: &Connection, id: i64, reason: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE downloads SET scan_threat = ?1 WHERE id = ?2",
+        rusqlite::params![reason, id],
+    )?;
+    Ok(())
+}
+
+/// Stores the JSON-encoded sandbox scan report for a download row.
+///
+/// Args:
+///   conn:        Open database connection.
+///   id:          The download row id.
+///   report_json: JSON string of the SandboxReport struct.
+pub fn update_sandbox_report(conn: &Connection, id: i64, report_json: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE downloads SET sandbox_report = ?1 WHERE id = ?2",
+        rusqlite::params![report_json, id],
     )?;
     Ok(())
 }

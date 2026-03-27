@@ -2,6 +2,7 @@ pub mod chunked;
 pub mod lifecycle;
 
 use crate::db::{self, DbState};
+use crate::shield;
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -63,7 +64,7 @@ pub async fn download_file(
     let file_path = dest_path.join(&filename);
 
     let outcome = run_download(&url, &destination, &filename, id, &app, token).await;
-    handle_outcome(outcome, intent, id, &file_path, &app).await;
+    handle_outcome(outcome, intent, id, &file_path, &url, &filename, &app).await;
 
     // Clean up lifecycle registry and drain the queue.
     if let Some(lifecycle) = app.try_state::<lifecycle::LifecycleState>() {
@@ -108,17 +109,20 @@ pub async fn download_file_resume(
         }
     }
 
+    let url = record.url.clone();
+    let filename = record.filename.clone();
+
     let outcome = run_download_resume(
-        &record.url,
+        &url,
         &record.destination,
-        &record.filename,
+        &filename,
         id,
         &app,
         token,
         snapshots,
     )
     .await;
-    handle_outcome(outcome, intent, id, &file_path, &app).await;
+    handle_outcome(outcome, intent, id, &file_path, &url, &filename, &app).await;
 
     if let Some(lifecycle) = app.try_state::<lifecycle::LifecycleState>() {
         lifecycle::deregister_download(&lifecycle, id);
@@ -127,36 +131,111 @@ pub async fn download_file_resume(
 }
 
 /// Handles a `LifecycleOutcome` (or error) from `run_download` / `run_download_resume`:
-/// updates DB, emits frontend events, and cleans up on cancel.
+/// runs the Shield scan pipeline on completion, updates DB, and emits frontend events.
 ///
 /// Args:
 ///   outcome:   The result from the download runner.
 ///   intent:    Intent flag to distinguish pause from cancel when outcome is Paused.
 ///   id:        The download row id.
 ///   file_path: Full path to the (possibly partial) file on disk.
+///   url:       The original download URL (passed to Shield Layer 5).
+///   filename:  The file name (passed to Shield for quarantine records).
 ///   app:       Tauri app handle.
 async fn handle_outcome(
     outcome: Result<chunked::LifecycleOutcome, String>,
     intent: Arc<AtomicU8>,
     id: i64,
     file_path: &PathBuf,
+    url: &str,
+    filename: &str,
     app: &tauri::AppHandle,
 ) {
     match outcome {
         Ok(chunked::LifecycleOutcome::Complete) => {
-            if let Some(db) = app.try_state::<DbState>() {
-                if let Ok(conn) = db.0.lock() {
-                    db::update_download_status(&conn, id, "complete").ok();
-                    db::delete_chunk_snapshots(&conn, id).ok();
-                }
-            }
+            // Emit scan-start event — triggers amber pulse on the download card.
             app.emit_all(
-                &format!("download://complete/{id}"),
-                CompletePayload {
-                    path: file_path.to_string_lossy().to_string(),
+                &format!("download://scan/{id}"),
+                shield::ScanPayload {
+                    layer: 0,
+                    name: "Starting scan".to_string(),
                 },
             )
             .ok();
+            if let Some(db) = app.try_state::<DbState>() {
+                if let Ok(conn) = db.0.lock() {
+                    db::update_download_status(&conn, id, "scanning").ok();
+                }
+            }
+
+            // Run the six-layer pipeline.
+            let result = shield::run_pipeline(file_path, url, filename, id, app).await;
+
+            // Persist SHA-256 regardless of verdict.
+            if let Some(db) = app.try_state::<DbState>() {
+                if let Ok(conn) = db.0.lock() {
+                    db::update_download_sha256(&conn, id, &result.sha256).ok();
+                }
+            }
+
+            // Persist sandbox report if Layer 7 ran.
+            if let Some(ref report_json) = result.sandbox_report {
+                if let Some(db) = app.try_state::<DbState>() {
+                    if let Ok(conn) = db.0.lock() {
+                        db::update_sandbox_report(&conn, id, report_json).ok();
+                    }
+                }
+            }
+
+            match result.verdict {
+                shield::FinalVerdict::Clean => {
+                    if let Some(db) = app.try_state::<DbState>() {
+                        if let Ok(conn) = db.0.lock() {
+                            db::update_download_status(&conn, id, "complete").ok();
+                            db::delete_chunk_snapshots(&conn, id).ok();
+                        }
+                    }
+                    app.emit_all(
+                        &format!("download://complete/{id}"),
+                        CompletePayload {
+                            path: file_path.to_string_lossy().to_string(),
+                        },
+                    )
+                    .ok();
+                }
+                shield::FinalVerdict::Quarantined { reason } => {
+                    let quar_path = quarantine_path(file_path);
+                    if let Some(parent) = quar_path.parent() {
+                        std::fs::create_dir_all(parent).ok();
+                    }
+                    std::fs::rename(file_path, &quar_path).ok();
+
+                    if let Some(db) = app.try_state::<DbState>() {
+                        if let Ok(conn) = db.0.lock() {
+                            db::update_download_status(&conn, id, "quarantined").ok();
+                            db::update_download_scan_threat(&conn, id, &reason).ok();
+                            db::delete_chunk_snapshots(&conn, id).ok();
+                            db::insert_quarantine(
+                                &conn,
+                                id,
+                                &result.sha256,
+                                filename,
+                                &file_path.to_string_lossy(),
+                                &quar_path.to_string_lossy(),
+                                &reason,
+                            )
+                            .ok();
+                        }
+                    }
+                    app.emit_all(
+                        &format!("download://quarantine/{id}"),
+                        shield::QuarantinePayload {
+                            reason,
+                            sha256: result.sha256,
+                        },
+                    )
+                    .ok();
+                }
+            }
         }
         Ok(chunked::LifecycleOutcome::Paused(snapshots)) => {
             let intent_val = intent.load(Ordering::Relaxed);
@@ -451,6 +530,25 @@ async fn download_single(
     }
 
     Ok(chunked::LifecycleOutcome::Complete)
+}
+
+/// Returns the quarantine path for a file: `{data_dir}/ReLay/quarantine/{filename}`.
+/// Falls back to `./quarantine/{filename}` if the OS data directory is unavailable.
+///
+/// Args:
+///   file_path: The file's original path (filename is extracted from it).
+///
+/// Returns:
+///   A PathBuf pointing to where the quarantined file should be stored.
+fn quarantine_path(file_path: &std::path::Path) -> PathBuf {
+    let filename = file_path
+        .file_name()
+        .unwrap_or(std::ffi::OsStr::new("quarantined"));
+    let base = dirs::data_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("ReLay")
+        .join("quarantine");
+    base.join(filename)
 }
 
 /// Extracts a filename from a URL by taking the last path segment

@@ -1,0 +1,6 @@
+# Build environment for ReLay's native dependencies.
+# YARA headers and libraries are installed via: brew install yara
+
+[env]
+YARA_INCLUDE_DIR = "/opt/homebrew/include"
+YARA_LIBRARY_PATH = "/opt/homebrew/lib"

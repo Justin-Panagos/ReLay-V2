@@ -184,6 +184,23 @@ pub fn cancel_download(
     Ok(())
 }
 
+/// Returns a single download record by its row id.
+///
+/// Args:
+///   id:    The downloads table row id.
+///   db:    Tauri-managed database state.
+///
+/// Returns:
+///   Some(DownloadRecord) if found, None if not found, Err on DB error.
+#[tauri::command]
+pub fn get_download_by_id(
+    id: i64,
+    db: State<'_, DbState>,
+) -> Result<Option<db::DownloadRecord>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    db::get_download_by_id(&conn, id).map_err(|e| e.to_string())
+}
+
 /// Resumes a previously paused download. Registers a new cancellation token in the
 /// lifecycle registry, loads chunk snapshots from the database, and spawns a resume task.
 ///
