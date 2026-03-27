@@ -25,7 +25,7 @@ bundle/
 .env
 .env.local
 .env.*.local
-
+.claude
 # OS files
 .DS_Store
 .DS_Store?
@@ -62,3 +62,4 @@ relay_investor_pitch.md
 relay_consolidated_plan.md
 BUILD_PLAN.md
 CLAUDE.md
+BACK_LOG.md
