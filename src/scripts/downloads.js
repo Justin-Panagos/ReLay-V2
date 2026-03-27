@@ -186,18 +186,102 @@ export function setCardResuming(id) {
 }
 
 /**
+ * Updates a download card to the scanning state — amber indeterminate progress bar,
+ * "Scanning…" status text, and hidden action buttons.
+ *
+ * Args:
+ *   id: The download id.
+ */
+export function setCardScanning(id) {
+  const card = document.querySelector(`.download-card[data-id="${id}"]`)
+  if (!card) return
+
+  const icon = card.querySelector('.card-type-icon')
+  icon.className = 'card-type-icon status-scanning'
+  icon.innerHTML = '&#128737;'
+
+  const fill = card.querySelector('.progress-fill')
+  fill.classList.add('progress-fill--indeterminate')
+  fill.style.width = ''
+  card.querySelector('.progress-bar').style.display = ''
+
+  card.querySelector('.card-status').textContent = 'Scanning\u2026'
+  card.querySelector('.card-speed').textContent = ''
+  card.querySelector('.card-pause').style.display = 'none'
+  card.querySelector('.card-resume').style.display = 'none'
+  card.querySelector('.card-cancel').style.display = 'none'
+}
+
+/**
+ * Marks a download card as quarantined — red icon, "Quarantined" status,
+ * and an inline reason line.
+ *
+ * Args:
+ *   id:     The download id.
+ *   reason: Human-readable threat description from the Shield pipeline.
+ */
+export function setCardQuarantined(id, reason) {
+  const card = document.querySelector(`.download-card[data-id="${id}"]`)
+  if (!card) return
+
+  const icon = card.querySelector('.card-type-icon')
+  icon.className = 'card-type-icon status-error'
+  icon.innerHTML = '&#9888;'
+
+  card.querySelector('.progress-bar').style.display = 'none'
+  card.querySelector('.card-status').textContent = 'Quarantined'
+  card.querySelector('.card-speed').textContent = ''
+  card.querySelector('.card-pause').style.display = 'none'
+  card.querySelector('.card-resume').style.display = 'none'
+  card.querySelector('.card-cancel').style.display = 'none'
+
+  // Append quarantine reason below status if not already present.
+  const meta = card.querySelector('.card-meta')
+  if (meta && !meta.querySelector('.card-quarantine-reason')) {
+    const reasonEl = document.createElement('span')
+    reasonEl.className = 'card-quarantine-reason'
+    reasonEl.textContent = reason
+    meta.appendChild(reasonEl)
+  }
+}
+
+/**
  * Populates the right detail panel with metadata for the selected download card.
+ * Fetches the full DB record to include scan results (SHA-256, threat, sandbox report).
  * Does nothing if the panel is not expanded.
  *
  * Args:
  *   id: The download id to show details for.
  */
-function showDetail(id) {
+async function showDetail(id) {
   const data = cardData.get(id)
   if (!data) return
 
   const body = document.querySelector('.detail-body')
   if (!body) return
+
+  // Fetch fresh DB record for scan fields (sha256, scan_threat, sandbox_report).
+  let record = null
+  try { record = await invoke('get_download_by_id', { id }) } catch { /* no-op */ }
+
+  let scanHtml = ''
+  if (record?.sha256) {
+    scanHtml += `<dt>SHA-256</dt><dd class="detail-hash">${escHtml(record.sha256)}</dd>`
+  }
+  if (record?.scan_threat) {
+    scanHtml += `<dt>Threat</dt><dd class="status-error">${escHtml(record.scan_threat)}</dd>`
+  }
+  if (record?.sandbox_report) {
+    try {
+      const r = JSON.parse(record.sandbox_report)
+      scanHtml += `
+        <dt>Sandbox</dt><dd>${escHtml(r.verdict)}</dd>
+        <dt>Network</dt><dd>${r.network_attempts} attempt(s)</dd>
+        <dt>Writes</dt><dd>${r.file_writes} attempt(s)</dd>
+        <dt>Blocked</dt><dd>${r.syscalls_blocked} syscall(s)</dd>
+      `
+    } catch { /* malformed JSON — skip */ }
+  }
 
   body.innerHTML = `
     <dl class="detail-list">
@@ -211,6 +295,7 @@ function showDetail(id) {
           Open folder &#8599;
         </button>
       </dd>
+      ${scanHtml}
     </dl>
   `
 

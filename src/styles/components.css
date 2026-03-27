@@ -319,3 +319,212 @@
 .detail-open-btn:hover {
   text-decoration: underline;
 }
+
+/* ── Torrent card extras ───────────────────────────────────────────────────── */
+
+.card-torrent-meta {
+  display: flex;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.card-peers {
+  color: var(--accent);
+  font-size: 10px;
+}
+
+.card-ratio {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.status-seeding {
+  color: var(--status-complete);
+}
+
+/* Drag-over highlight on the Torrent tab */
+#tab-torrent.drag-over {
+  background: var(--bg-secondary);
+  outline: 2px dashed var(--accent);
+  outline-offset: -6px;
+}
+
+/* ── Modal overlay ─────────────────────────────────────────────────────────── */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal-overlay.hidden {
+  display: none;
+}
+
+.modal-box {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  width: 360px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.modal-title {
+  color: var(--text);
+}
+
+.modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 14px;
+}
+
+.modal-footer {
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.modal-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.modal-input {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-secondary);
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+}
+
+.modal-input:focus {
+  border-color: var(--accent);
+}
+
+.modal-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.btn-primary {
+  padding: 5px 14px;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.btn-primary:hover {
+  opacity: 0.9;
+}
+
+.btn-secondary {
+  padding: 5px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-secondary);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.btn-secondary:hover {
+  background: var(--bg-tertiary);
+}
+
+/* ── Torrent file list (inside modal) ──────────────────────────────────────── */
+
+.torrent-file-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.torrent-file-item:last-child {
+  border-bottom: none;
+}
+
+.torrent-file-check {
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+
+.torrent-file-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+
+.torrent-file-size {
+  color: var(--text-muted);
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+/* ── Quarantine card ──────────────────────────────────────────────────────── */
+
+.card-quarantine-reason {
+  font-size: 10px;
+  color: var(--accent-red);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Settings tab */
+.settings-section        { padding: 12px; }
+.settings-section-title  { font-size: 11px; font-weight: 600; color: var(--text-muted);
+                            text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
+.settings-row            { display: flex; align-items: center; justify-content: space-between;
+                            padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+.settings-label          { display: flex; align-items: center; gap: 6px; color: var(--text); }
+.settings-badge-pro      { font-size: 9px; font-weight: 700; padding: 1px 5px;
+                            border-radius: 3px; background: var(--accent); color: #fff; }
+.settings-input          { padding: 4px 7px; border: 1px solid var(--border);
+                            border-radius: var(--radius); background: var(--bg-secondary);
+                            color: var(--text); font-size: 11px; font-family: inherit;
+                            width: 140px; outline: none; }
+.settings-input:focus    { border-color: var(--accent); }
+
+/* Scan results in detail panel */
+.detail-hash             { font-size: 9px; font-family: monospace; color: var(--text-muted);
+                            word-break: break-all; white-space: normal; }

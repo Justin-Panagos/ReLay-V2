@@ -64,15 +64,32 @@
         </div>
 
         <div id="tab-torrent" class="tab-pane">
-          <div class="empty-state">Drop a .torrent file here or paste a magnet link above</div>
+          <div id="torrents-list">
+            <div class="empty-state" id="torrents-empty">Drop a .torrent file here or paste a magnet link above</div>
+          </div>
         </div>
 
         <div id="tab-quarantine" class="tab-pane">
-          <div class="empty-state">No threats detected</div>
+          <div id="quarantine-list"></div>
+          <div id="quarantine-empty" class="empty-state">No threats detected</div>
         </div>
 
         <div id="tab-settings" class="tab-pane">
-          <div class="empty-state">Settings &#8212; coming soon</div>
+          <div class="settings-section">
+            <div class="settings-section-title">Shield</div>
+            <label class="settings-row">
+              <span class="settings-label">
+                Sandbox Scanning
+                <span class="settings-badge-pro">Pro</span>
+              </span>
+              <input type="checkbox" id="setting-sandbox" />
+            </label>
+            <label class="settings-row">
+              <span class="settings-label">VirusTotal API Key</span>
+              <input type="text" id="setting-vt-key" class="settings-input"
+                     placeholder="Paste API key&#8230;" />
+            </label>
+          </div>
         </div>
 
       </div><!-- /tab-content -->
@@ -90,6 +107,28 @@
     </div>
 
   </div><!-- /app -->
+  <!-- Torrent file modal (hidden until a .torrent file is dropped) -->
+  <div id="torrent-modal" class="modal-overlay hidden" role="dialog" aria-modal="true">
+    <div class="modal-box">
+      <div class="modal-header">
+        <span class="modal-title">Add Torrent</span>
+        <button class="btn-icon modal-close" id="torrent-modal-close">&#10005;</button>
+      </div>
+      <div class="modal-body">
+        <div id="torrent-file-list"><!-- populated by torrent.js --></div>
+      </div>
+      <div class="modal-footer">
+        <label class="modal-label">Save to:
+          <input id="torrent-dest-input" type="text" class="modal-input" />
+        </label>
+        <div class="modal-actions">
+          <button id="torrent-modal-cancel" class="btn-secondary">Cancel</button>
+          <button id="torrent-modal-confirm" class="btn-primary">Start Download</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script type="module" src="/scripts/main.js"></script>
 </body>
 </html>

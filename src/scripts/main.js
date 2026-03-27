@@ -13,8 +13,22 @@ import {
   setCardError,
   setCardPaused,
   setCardResuming,
+  setCardScanning,
+  setCardQuarantined,
 } from './downloads.js'
 import { loadHistory } from './history.js'
+import {
+  addTorrentCard,
+  updateTorrentProgress,
+  setTorrentCardComplete,
+  setTorrentCardError,
+  setTorrentCardPaused,
+  subscribeToTorrentEvents,
+  loadTorrents,
+  initTorrentDrop,
+} from './torrent.js'
+import { loadQuarantine } from './quarantine.js'
+import { initSettings } from './settings.js'
 
 const urlInput = document.getElementById('url-input')
 const startBtn = document.getElementById('start-btn')
@@ -34,7 +48,8 @@ async function init() {
   try {
     await invoke('reset_stale_downloads')
   } catch { /* non-fatal */ }
-  await Promise.all([loadHistory(), loadPausedDownloads()])
+  initTorrentDrop()
+  await Promise.all([loadHistory(), loadPausedDownloads(), loadTorrents(), loadQuarantine(), initSettings()])
 }
 
 init()
@@ -73,12 +88,32 @@ async function subscribeToDownloadEvents(id) {
     cleanup()
   })
 
+  const unlistenScan = await listen(`download://scan/${id}`, () => {
+    setCardScanning(id)
+  })
+
+  const unlistenQuarantine = await listen(`download://quarantine/${id}`, async (e) => {
+    setCardQuarantined(id, e.payload.reason)
+    activeDownloads.delete(id)
+    cleanup()
+    // Switch to the Quarantine tab so the user sees the threat immediately.
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'))
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'))
+    const quarTab = document.querySelector('.tab[data-tab="quarantine"]')
+    if (quarTab) quarTab.classList.add('active')
+    const quarPane = document.getElementById('tab-quarantine')
+    if (quarPane) quarPane.classList.add('active')
+    await loadQuarantine()
+  })
+
   /** Removes all event listeners for this download. */
   function cleanup() {
     unlistenProgress()
     unlistenComplete()
     unlistenError()
     unlistenPaused()
+    unlistenScan()
+    unlistenQuarantine()
   }
 
   return cleanup
@@ -95,6 +130,12 @@ async function subscribeToDownloadEvents(id) {
  *   url: The URL string entered by the user.
  */
 async function startDownload(url) {
+  // Route magnet links to the torrent engine.
+  if (url.startsWith('magnet:')) {
+    await startMagnet(url)
+    return
+  }
+
   proPrompt.classList.add('hidden')
 
   // Derive filename client-side so the card is shown before the backend responds.
@@ -112,6 +153,32 @@ async function startDownload(url) {
   activeDownloads.add(id)
   addDownloadCard(id, filename, url, destination, { onResume: resumeDownload })
   await subscribeToDownloadEvents(id)
+}
+
+/**
+ * Starts a magnet link download via the torrent engine.
+ * Switches to the Torrent tab and adds a card that tracks progress.
+ *
+ * Args:
+ *   magnet: The magnet URI string.
+ */
+async function startMagnet(magnet) {
+  let id
+  try {
+    id = await invoke('add_magnet', { magnet })
+  } catch (err) {
+    console.error('add_magnet failed:', err)
+    return
+  }
+
+  // Switch to the Torrent tab.
+  document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'))
+  document.querySelectorAll('.tab-pane').forEach((p) => p.classList.remove('active'))
+  document.querySelector('.tab[data-tab="torrent"]').classList.add('active')
+  document.getElementById('tab-torrent').classList.add('active')
+
+  addTorrentCard(id, magnet)
+  await subscribeToTorrentEvents(id)
 }
 
 // ── Download resume ───────────────────────────────────────────────────────────
