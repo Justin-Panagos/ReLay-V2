@@ -66,10 +66,24 @@ function buildQuarantineCard(record) {
       <div class="card-quarantine-reason">${escHtml(record.threat_reason)}</div>
     </div>
     <div class="card-actions">
+      <button class="btn-icon quar-submit" title="Submit to community for review">&#9873;</button>
       <button class="btn-icon quar-restore" title="Restore to original location">&#8617;</button>
       <button class="btn-icon quar-delete" title="Delete permanently">&#128465;</button>
     </div>
   `
+
+  card.querySelector('.quar-submit').addEventListener('click', async (e) => {
+    e.stopPropagation()
+    const btn = e.target
+    btn.disabled = true
+    try {
+      await invoke('submit_zero_day', { quarantineId: record.id })
+      btn.textContent = '\u2713'
+    } catch (err) {
+      console.error('submit_zero_day failed:', err)
+      btn.disabled = false
+    }
+  })
 
   card.querySelector('.quar-restore').addEventListener('click', async (e) => {
     e.stopPropagation()

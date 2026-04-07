@@ -13,6 +13,7 @@ A cross-platform desktop download manager built with Rust and Tauri. ReLay combi
 - HTTP/2 multiplexing via reqwest
 - Pause, resume, and cancel at any point
 - Magnet link and .torrent file support (DHT + PEX peer discovery)
+- UPnP port forwarding for inbound peer connections (port 6881)
 - Drag-and-drop URLs and .torrent files
 
 ### ReLay Shield
@@ -120,6 +121,19 @@ relay/
 │   └── update/         # App version tracking
 └── extension/          # Browser extension (Chrome + Firefox)
 ```
+
+---
+
+## Torrent Networking Notes
+
+ReLay uses UPnP to automatically open an inbound port (6881) on your router, which allows peers to connect to you directly and significantly improves download speeds.
+
+**If speeds are still slow, check the following:**
+
+- **Strict NAT or corporate firewall** — UPnP won't work. Manually forward TCP/UDP port 6881 on your router to your machine.
+- **macOS firewall** — Allow ReLay through `System Settings → Privacy & Security → Firewall`. Without this, macOS blocks inbound peer connections even if the router is open.
+- **Router with UPnP disabled** — Enable UPnP in your router admin panel (usually under Advanced → NAT or WAN settings).
+- **Low-seeder torrent** — If the torrent itself has very few seeders, speeds will be limited regardless of network configuration.
 
 ---
 

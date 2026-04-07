@@ -1,0 +1,7 @@
+icp_url    = "https://ic0.app"
+worker_url = "https://relay-worker.REPLACE_WITH_YOUR_SUBDOMAIN.workers.dev"
+
+[canisters]
+pattern    = "aaaaa-aa"
+governance = "bbbbb-bb"
+identity   = "ccccc-cc"

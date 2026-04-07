@@ -40,6 +40,7 @@
         <button class="tab" data-tab="history">History</button>
         <button class="tab" data-tab="torrent">Torrent</button>
         <button class="tab" data-tab="quarantine">Shield</button>
+        <button class="tab" data-tab="community">Community</button>
         <button class="tab" data-tab="settings">Settings</button>
       </nav>
 
@@ -74,7 +75,40 @@
           <div id="quarantine-empty" class="empty-state">No threats detected</div>
         </div>
 
+        <div id="tab-community" class="tab-pane">
+          <div class="community-header">
+            <span class="community-rep-label">Reputation</span>
+            <span id="community-rep-score" class="community-rep-value">&#8212;</span>
+            <button id="community-refresh-btn" class="btn-icon" title="Refresh proposals">&#8635;</button>
+          </div>
+          <div id="community-proposals-list"></div>
+          <div id="community-empty" class="empty-state">No community proposals yet</div>
+        </div>
+
         <div id="tab-settings" class="tab-pane">
+          <div class="settings-section">
+            <div class="settings-section-title">Pro</div>
+            <div class="settings-row">
+              <span class="settings-label">Status</span>
+              <span id="pro-status-value" class="settings-value">&#8212;</span>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">Renews</span>
+              <span id="pro-expiry-value" class="settings-value">&#8212;</span>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">Device ID</span>
+              <span id="pro-device-id" class="settings-value settings-device-id" title="">&#8212;</span>
+            </div>
+            <div class="settings-row" id="pro-upgrade-row">
+              <span class="settings-label">Upgrade</span>
+              <button id="pro-upgrade-btn" class="btn-primary">Upgrade to Pro &#8212; $5/mo</button>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">Licence</span>
+              <button id="pro-recheck-btn" class="btn-secondary">Re-check</button>
+            </div>
+          </div>
           <div class="settings-section">
             <div class="settings-section-title">Shield</div>
             <label class="settings-row">

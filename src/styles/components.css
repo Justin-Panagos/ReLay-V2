@@ -524,7 +524,65 @@
                             color: var(--text); font-size: 11px; font-family: inherit;
                             width: 140px; outline: none; }
 .settings-input:focus    { border-color: var(--accent); }
+.settings-value          { font-variant-numeric: tabular-nums; color: var(--text); font-size: 12px; }
+.settings-device-id      { font-size: 0.75rem; max-width: 16ch; overflow: hidden;
+                            text-overflow: ellipsis; white-space: nowrap; cursor: default; }
 
 /* Scan results in detail panel */
 .detail-hash             { font-size: 9px; font-family: monospace; color: var(--text-muted);
                             word-break: break-all; white-space: normal; }
+
+/* ── Community tab ──────────────────────────────────────────────────────────── */
+.community-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.community-rep-label { color: var(--text-muted); }
+.community-rep-value { font-weight: 600; color: var(--accent); }
+
+.proposal-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+.proposal-hash {
+  font-size: 9px;
+  font-family: monospace;
+  color: var(--text-muted);
+  word-break: break-all;
+  white-space: normal;
+}
+.proposal-meta {
+  display: flex;
+  gap: 8px;
+  color: var(--text-muted);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.proposal-status-pending  { color: var(--accent-amber); font-weight: 600; }
+.proposal-status-approved { color: var(--accent-green); font-weight: 600; }
+.proposal-status-rejected { color: var(--accent-red);   font-weight: 600; }
+.proposal-votes { display: flex; gap: 6px; margin-top: 4px; }
+.vote-approve-btn,
+.vote-reject-btn {
+  padding: 2px 10px;
+  border-radius: var(--radius);
+  font-size: 11px;
+  cursor: pointer;
+  font-family: inherit;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text);
+}
+.vote-approve-btn:hover { background: var(--accent-green); color: #fff; border-color: var(--accent-green); }
+.vote-reject-btn:hover  { background: var(--accent-red);   color: #fff; border-color: var(--accent-red); }
+.vote-approve-btn:disabled,
+.vote-reject-btn:disabled { opacity: 0.4; cursor: default; }

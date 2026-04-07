@@ -1,1 +1,5 @@
-// icp module — Phase 0 stub
+pub mod agent;
+pub mod config;
+pub mod sync;
+
+pub use config::{AppConfig, ConfigState};

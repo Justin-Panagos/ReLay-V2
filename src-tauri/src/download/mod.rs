@@ -346,11 +346,21 @@ async fn run_download(
         }
     }
 
+    // Pro users get 16 parallel chunks; Free users get 8.
+    let max_chunks = if app
+        .try_state::<DbState>()
+        .and_then(|db| db.0.lock().ok().map(|conn| crate::pro::is_pro(&conn)))
+        .unwrap_or(false)
+    {
+        chunked::PRO_TIER_CHUNKS
+    } else {
+        chunked::FREE_TIER_CHUNKS
+    };
+
     // Use chunked only when the file is large enough to benefit from parallel chunks.
     let chunk_count = content_length
         .map(|n| {
-            (n / chunked::MIN_CHUNK_BYTES)
-                .clamp(1, chunked::FREE_TIER_CHUNKS as u64) as usize
+            (n / chunked::MIN_CHUNK_BYTES).clamp(1, max_chunks as u64) as usize
         })
         .unwrap_or(1);
 

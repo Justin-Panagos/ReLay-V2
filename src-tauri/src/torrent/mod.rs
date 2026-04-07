@@ -31,8 +31,10 @@ pub struct TorrentProgressPayload {
     pub downloaded: u64,
     /// Total bytes in the torrent (0 if not yet known).
     pub total: u64,
-    /// Number of currently live (connected) peers.
+    /// Number of fully connected (live) peers.
     pub peers: usize,
+    /// Number of peers currently connecting (visible during initializing phase).
+    pub connecting: usize,
     /// Upload ratio: uploaded / downloaded. 0.0 when downloaded == 0.
     pub ratio: f64,
     /// Number of pieces downloaded and checked.
@@ -41,6 +43,8 @@ pub struct TorrentProgressPayload {
     pub state: String,
     /// Download speed in bytes per second.
     pub speed_bps: u64,
+    /// Resolved torrent name, or None while still in metadata resolution.
+    pub name: Option<String>,
 }
 
 /// Payload for the `torrent://complete/{db_id}` event.
@@ -325,9 +329,11 @@ pub fn spawn_progress_poller(
                     }
 
                     // Build peer count and ratio.
-                    let (peers, ratio, speed_bps) = match &stats.live {
+                    let (peers, connecting, ratio, speed_bps) = match &stats.live {
                         Some(live) => {
                             let peers = live.snapshot.peer_stats.live;
+                            let connecting = live.snapshot.peer_stats.connecting
+                                + live.snapshot.peer_stats.queued;
                             let ratio = if stats.progress_bytes > 0 {
                                 stats.uploaded_bytes as f64 / stats.progress_bytes as f64
                             } else {
@@ -335,10 +341,12 @@ pub fn spawn_progress_poller(
                             };
                             let speed_bps =
                                 (live.download_speed.mbps * 1_048_576.0) as u64;
-                            (peers, ratio, speed_bps)
+                            (peers, connecting, ratio, speed_bps)
                         }
-                        None => (0, 0.0, 0),
+                        None => (0, 0, 0.0, 0),
                     };
+
+                    let name = handle.name();
 
                     let state_str = match stats.state {
                         TorrentStatsState::Initializing => "initializing",
@@ -357,10 +365,12 @@ pub fn spawn_progress_poller(
                         downloaded: stats.progress_bytes,
                         total: stats.total_bytes,
                         peers,
+                        connecting,
                         ratio,
                         pieces,
                         state: state_str.to_string(),
                         speed_bps,
+                        name,
                     };
 
                     let _ = app.emit_all(

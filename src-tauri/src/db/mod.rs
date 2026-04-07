@@ -64,6 +64,17 @@ fn migrations() -> Migrations<'static> {
         ),
         // v5 — sandbox scan report (Layer 7, Pro)
         M::up("ALTER TABLE downloads ADD COLUMN sandbox_report TEXT;"),
+        // v6 — ICP pattern cache for offline Shield lookups
+        M::up(
+            "CREATE TABLE icp_patterns (
+                id           INTEGER PRIMARY KEY,
+                sha256       TEXT NOT NULL UNIQUE,
+                threat_level TEXT NOT NULL,
+                source       TEXT NOT NULL,
+                timestamp    INTEGER NOT NULL
+            );
+            CREATE INDEX icp_patterns_sha256_idx ON icp_patterns (sha256);",
+        ),
     ])
 }
 
@@ -607,6 +618,37 @@ pub fn get_quarantine(conn: &Connection, limit: i64) -> Result<Vec<QuarantineRec
     rows.collect()
 }
 
+/// Returns a single quarantine row by its id.
+///
+/// Args:
+///   conn: Open database connection.
+///   id:   The quarantine table row id.
+///
+/// Returns:
+///   Some(QuarantineRecord) if found, None otherwise.
+pub fn get_quarantine_by_id(conn: &Connection, id: i64) -> Result<Option<QuarantineRecord>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, download_id, sha256, filename, original_path, quarantine_path, threat_reason, quarantined_at
+         FROM quarantine WHERE id = ?1",
+    )?;
+    let mut rows = stmt.query_map([id], |row| {
+        Ok(QuarantineRecord {
+            id: row.get(0)?,
+            download_id: row.get(1)?,
+            sha256: row.get(2)?,
+            filename: row.get(3)?,
+            original_path: row.get(4)?,
+            quarantine_path: row.get(5)?,
+            threat_reason: row.get(6)?,
+            quarantined_at: row.get(7)?,
+        })
+    })?;
+    match rows.next() {
+        Some(record) => Ok(Some(record?)),
+        None => Ok(None),
+    }
+}
+
 /// Deletes a single quarantine row by its id.
 /// Does NOT delete the file on disk — use the command layer for that.
 ///
@@ -660,6 +702,54 @@ pub fn update_sandbox_report(conn: &Connection, id: i64, report_json: &str) -> R
     Ok(())
 }
 
+/// Upserts a batch of ICP pattern entries into the local cache.
+/// Uses INSERT OR REPLACE so the same hash can be re-synced with updated metadata.
+/// Wraps the batch in a single transaction for performance.
+///
+/// Args:
+///   conn:    Open database connection.
+///   entries: Slice of PatternEntry values received from the ICP pattern canister.
+pub fn upsert_icp_patterns(
+    conn: &Connection,
+    entries: &[crate::icp::agent::PatternEntry],
+) -> Result<()> {
+    conn.execute_batch("BEGIN")?;
+    for entry in entries {
+        conn.execute(
+            "INSERT OR REPLACE INTO icp_patterns (id, sha256, threat_level, source, timestamp)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![
+                entry.id as i64,
+                entry.sha256,
+                entry.threat_level,
+                entry.source,
+                entry.timestamp as i64,
+            ],
+        )?;
+    }
+    conn.execute_batch("COMMIT")?;
+    Ok(())
+}
+
+/// Checks whether a SHA-256 hash exists in the local ICP pattern cache.
+///
+/// Args:
+///   conn:   Open database connection.
+///   sha256: Hex-encoded SHA-256 to look up.
+///
+/// Returns:
+///   Some(threat_level) if the hash is known, None if not in the cache.
+pub fn lookup_icp_pattern(conn: &Connection, sha256: &str) -> Result<Option<String>> {
+    let mut stmt =
+        conn.prepare("SELECT threat_level FROM icp_patterns WHERE sha256 = ?1 LIMIT 1")?;
+    let mut rows = stmt.query([sha256])?;
+    if let Some(row) = rows.next()? {
+        Ok(Some(row.get(0)?))
+    } else {
+        Ok(None)
+    }
+}
+
 /// Returns the current time as a Unix timestamp string.
 fn unix_now() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -667,4 +757,96 @@ fn unix_now() -> String {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs().to_string())
         .unwrap_or_else(|_| "0".to_string())
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::icp::agent::PatternEntry;
+
+    /// Opens a fully-migrated in-memory SQLite database for use in tests.
+    fn open_test_db() -> Connection {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrations().to_latest(&mut conn).unwrap();
+        conn
+    }
+
+    fn make_entry(id: u64, sha256: &str, threat_level: &str) -> PatternEntry {
+        // Constructs a minimal PatternEntry for use in tests.
+        PatternEntry {
+            id,
+            sha256: sha256.to_string(),
+            threat_level: threat_level.to_string(),
+            source: "test".to_string(),
+            timestamp: 1_000_000,
+        }
+    }
+
+    // ── upsert_icp_patterns / lookup_icp_pattern ─────────────────────────────
+
+    #[test]
+    fn upsert_and_lookup_known_hash() {
+        // Verifies that a upserted pattern entry can be retrieved by sha256.
+        let conn = open_test_db();
+        upsert_icp_patterns(&conn, &[make_entry(1, "abc123", "high")]).unwrap();
+        let result = lookup_icp_pattern(&conn, "abc123").unwrap();
+        assert_eq!(result, Some("high".to_string()));
+    }
+
+    #[test]
+    fn lookup_unknown_hash_returns_none() {
+        // Verifies that looking up a hash that was never inserted returns None.
+        let conn = open_test_db();
+        let result = lookup_icp_pattern(&conn, "nonexistent").unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn upsert_updates_threat_level_on_re_sync() {
+        // Verifies that upserting the same id with a different threat_level overwrites the old row.
+        let conn = open_test_db();
+        upsert_icp_patterns(&conn, &[make_entry(1, "abc123", "low")]).unwrap();
+        upsert_icp_patterns(&conn, &[make_entry(1, "abc123", "critical")]).unwrap();
+        let result = lookup_icp_pattern(&conn, "abc123").unwrap();
+        assert_eq!(result, Some("critical".to_string()));
+    }
+
+    #[test]
+    fn upsert_batch_inserts_all_entries() {
+        // Verifies that a multi-entry batch is fully persisted.
+        let conn = open_test_db();
+        let entries = vec![
+            make_entry(1, "hash1", "low"),
+            make_entry(2, "hash2", "medium"),
+            make_entry(3, "hash3", "high"),
+        ];
+        upsert_icp_patterns(&conn, &entries).unwrap();
+
+        assert_eq!(lookup_icp_pattern(&conn, "hash1").unwrap(), Some("low".to_string()));
+        assert_eq!(lookup_icp_pattern(&conn, "hash2").unwrap(), Some("medium".to_string()));
+        assert_eq!(lookup_icp_pattern(&conn, "hash3").unwrap(), Some("high".to_string()));
+    }
+
+    #[test]
+    fn upsert_empty_batch_is_noop() {
+        // Verifies that upserting an empty slice does not error and leaves the table unchanged.
+        let conn = open_test_db();
+        upsert_icp_patterns(&conn, &[]).unwrap();
+        let result = lookup_icp_pattern(&conn, "anything").unwrap();
+        assert_eq!(result, None);
+    }
+
+    // ── icp_patterns sha256 index (sanity check) ─────────────────────────────
+
+    #[test]
+    fn lookup_is_case_sensitive() {
+        // Verifies that the sha256 lookup is case-sensitive (hashes are lowercase hex).
+        let conn = open_test_db();
+        upsert_icp_patterns(&conn, &[make_entry(1, "abcdef", "high")]).unwrap();
+        // Uppercase version must not match.
+        let result = lookup_icp_pattern(&conn, "ABCDEF").unwrap();
+        assert_eq!(result, None);
+    }
 }

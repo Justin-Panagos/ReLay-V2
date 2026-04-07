@@ -28,6 +28,11 @@ yara = "0.31"
 memmap2 = "0.9"
 infer = "0.16"
 goblin = "0.8"
+ic-agent  = { version = "0.37", default-features = false, features = ["reqwest"] }
+candid    = "0.10"
+uuid      = { version = "1", features = ["v4"] }
+toml      = "0.8"
+thiserror = "1"
 
 [features]
 default = ["custom-protocol"]

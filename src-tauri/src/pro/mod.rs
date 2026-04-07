@@ -24,7 +24,7 @@ pub fn is_pro(conn: &Connection) -> bool {
 ///
 /// Returns:
 ///   Ok(()) if Pro, Err with a user-facing message if not.
-#[allow(dead_code)]
+#[allow(dead_code)] // used in Phase 13 for API access gating
 pub fn require_pro(conn: &Connection) -> Result<(), String> {
     if is_pro(conn) {
         Ok(())

@@ -29,6 +29,7 @@ import {
 } from './torrent.js'
 import { loadQuarantine } from './quarantine.js'
 import { initSettings } from './settings.js'
+import { initCommunity, loadCommunity } from './community.js'
 
 const urlInput = document.getElementById('url-input')
 const startBtn = document.getElementById('start-btn')
@@ -49,7 +50,8 @@ async function init() {
     await invoke('reset_stale_downloads')
   } catch { /* non-fatal */ }
   initTorrentDrop()
-  await Promise.all([loadHistory(), loadPausedDownloads(), loadTorrents(), loadQuarantine(), initSettings()])
+  initCommunity()
+  await Promise.all([loadHistory(), loadPausedDownloads(), loadTorrents(), loadQuarantine(), initSettings(), loadCommunity()])
 }
 
 init()
@@ -244,6 +246,10 @@ urlInput.addEventListener('keydown', (e) => {
 
 proPrompt.querySelector('.pro-prompt-dismiss')?.addEventListener('click', () => {
   proPrompt.classList.add('hidden')
+})
+
+proPrompt.querySelector('.pro-prompt-upgrade')?.addEventListener('click', async () => {
+  await invoke('open_upgrade_page').catch(err => console.error('open_upgrade_page:', err))
 })
 
 // ── Tab switching ─────────────────────────────────────────────────────────────

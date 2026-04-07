@@ -13,7 +13,9 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
 /// Free-tier maximum concurrent chunks.
-pub const FREE_TIER_CHUNKS: usize = 8;
+pub const FREE_TIER_CHUNKS: usize = 16;
+/// Pro-tier maximum concurrent chunks.
+pub const PRO_TIER_CHUNKS: usize = 32;
 /// Minimum chunk size in bytes — files smaller than this use a single chunk.
 pub const MIN_CHUNK_BYTES: u64 = 1_048_576; // 1 MB
 

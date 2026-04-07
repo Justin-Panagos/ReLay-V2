@@ -11,6 +11,7 @@ mod torrent;
 
 use db::DbState;
 use download::lifecycle::{LifecycleState, QueueState};
+use icp::ConfigState;
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -25,7 +26,8 @@ fn main() {
                 .app_data_dir()
                 .expect("could not resolve app data dir");
 
-            let conn = db::init_db(dir).expect("failed to initialise database");
+            let conn = db::init_db(dir.clone()).expect("failed to initialise database");
+            let icp_config = icp::config::load_config(&dir);
 
             // Read default_folder for the torrent session output directory.
             let torrent_output: PathBuf = db::get_setting(&conn, "default_folder")
@@ -35,12 +37,25 @@ fn main() {
                 .unwrap_or_else(|| PathBuf::from("."));
 
             // Initialise the librqbit torrent session on Tauri's Tokio runtime.
-            // Session::new() is async; block_on bridges the sync setup closure.
+            // Session::new_with_opts() is async; block_on bridges the sync setup closure.
+            // UPnP port forwarding and a fixed listen port range are enabled so the
+            // router maps an inbound port, allowing peers to dial in directly.
+            // defer_writes_up_to buffers piece writes in memory (32 MB) so disk I/O
+            // does not bottleneck fast connections.
             let torrent_session = tauri::async_runtime::block_on(
-                librqbit::Session::new(torrent_output),
+                librqbit::Session::new_with_opts(
+                    torrent_output,
+                    librqbit::SessionOptions {
+                        enable_upnp_port_forwarding: true,
+                        listen_port_range: Some(6881..6891),
+                        defer_writes_up_to: Some(32),
+                        ..Default::default()
+                    },
+                ),
             )
             .expect("failed to initialise torrent session");
 
+            app.manage(ConfigState(icp_config.clone()));
             app.manage(
                 reqwest::Client::builder()
                     .connect_timeout(std::time::Duration::from_secs(10))
@@ -52,6 +67,13 @@ fn main() {
             app.manage(QueueState(Mutex::new(VecDeque::new())));
             app.manage(TorrentSessionState(torrent_session));
             app.manage(TorrentPollerState(Mutex::new(HashMap::new())));
+
+            // Spawn ICP startup: device registration, licence sync, pattern sync loop.
+            let app_handle = app.handle();
+            let config_for_startup = icp_config.clone();
+            tauri::async_runtime::spawn(async move {
+                icp::sync::run_startup(app_handle, config_for_startup).await;
+            });
 
             Ok(())
         })
@@ -75,6 +97,13 @@ fn main() {
             commands::shield::get_quarantine,
             commands::shield::restore_quarantine,
             commands::shield::delete_quarantine,
+            commands::icp::submit_zero_day,
+            commands::icp::get_proposals,
+            commands::icp::get_reputation,
+            commands::icp::vote_proposal,
+            commands::pro::get_pro_status,
+            commands::pro::open_upgrade_page,
+            commands::pro::recheck_licence,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ReLay");

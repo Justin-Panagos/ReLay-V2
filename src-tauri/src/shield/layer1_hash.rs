@@ -2,23 +2,26 @@ use sha2::{Digest, Sha256};
 use std::io::Read;
 
 use super::{LayerResult, LayerVerdict, ScanContext};
+use tauri::Manager;
+
+use crate::db::{self, DbState};
 
 /// Layer 1: SHA-256 hash check.
 /// Computes the file's SHA-256 digest and stores it in `ctx.sha256`.
-/// If a VirusTotal API key is configured, checks the hash against the VT database.
-/// Returns Threat if VT reports any malicious detections; Clean otherwise.
+/// Checks the local ICP pattern cache first, then the VirusTotal API (if configured).
+/// Returns Threat immediately if a match is found in either source; Clean otherwise.
 ///
 /// Args:
-///   ctx:     Mutable scan context — `sha256` field is populated by this layer.
-///   vt_key:  Optional VirusTotal API key from settings.
-///   _app:    Tauri app handle (reserved for future use).
+///   ctx:    Mutable scan context — `sha256` field is populated by this layer.
+///   vt_key: Optional VirusTotal API key from settings.
+///   app:    Tauri app handle used to access the shared DbState for ICP cache lookup.
 ///
 /// Returns:
 ///   LayerResult with the hash verdict.
 pub async fn scan(
     ctx: &mut ScanContext,
     vt_key: Option<&str>,
-    _app: &tauri::AppHandle,
+    app: &tauri::AppHandle,
 ) -> LayerResult {
     // ── Step 1: compute SHA-256 ───────────────────────────────────────────────
     let sha256 = match compute_sha256(&ctx.path) {
@@ -35,7 +38,24 @@ pub async fn scan(
     };
     ctx.sha256 = sha256.clone();
 
-    // ── Step 2: optional VirusTotal lookup ────────────────────────────────────
+    // ── Step 2: check local ICP pattern cache ────────────────────────────────
+    if let Some(db_state) = app.try_state::<DbState>() {
+        if let Ok(conn) = db_state.0.lock() {
+            if let Ok(Some(threat_level)) = db::lookup_icp_pattern(&conn, &sha256) {
+                return LayerResult {
+                    layer: 1,
+                    name: "Hash",
+                    verdict: LayerVerdict::Threat {
+                        reason: format!(
+                            "ICP Shield Network: known threat ({threat_level})"
+                        ),
+                    },
+                };
+            }
+        }
+    }
+
+    // ── Step 3: optional VirusTotal lookup ────────────────────────────────────
     if let Some(key) = vt_key {
         match check_virustotal(&sha256, key).await {
             Ok(Some(reason)) => {

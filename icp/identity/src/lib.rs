@@ -61,14 +61,19 @@ fn register_device(device_id: String) {
     });
 }
 
-/// Grants a Pro licence to the specified device until expiry_timestamp.
-/// FIXME(Phase-12): add controller-only caller check before mainnet deployment.
+/// Grants or revokes a Pro licence for the specified device.
+/// Callable only by a canister controller (the Cloudflare Worker's ICP identity).
+/// To revoke, pass expiry_timestamp = 0.
 ///
 /// Args:
 ///   device_id:        The device's unique identifier string.
-///   expiry_timestamp: Unix seconds at which the Pro licence expires.
+///   expiry_timestamp: Unix seconds at which Pro expires; 0 = Free.
 #[ic_cdk::update]
 fn grant_pro(device_id: String, expiry_timestamp: u64) {
+    assert!(
+        ic_cdk::api::is_controller(&ic_cdk::caller()),
+        "only a canister controller may call grant_pro"
+    );
     LICENCES.with(|m| {
         m.borrow_mut().insert(device_id, expiry_timestamp);
     });

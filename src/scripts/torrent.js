@@ -79,18 +79,20 @@ export function addTorrentCard(id, name, destination = '') {
 }
 
 /**
- * Updates the progress bar, speed, peer count, and ratio for a torrent card.
+ * Updates the progress bar, speed, peer count, ratio, and name for a torrent card.
  *
  * Args:
- *   id:       The DB download id.
+ *   id:         The DB download id.
  *   downloaded: Bytes downloaded and verified so far.
- *   total:    Total bytes (0 if unknown).
- *   peers:    Number of live peers.
- *   ratio:    Upload ratio (uploaded / downloaded).
- *   speedBps: Current download speed in bytes per second.
- *   state:    Torrent state string ("initializing" | "live" | "paused" | "error").
+ *   total:      Total bytes (0 if unknown).
+ *   peers:      Number of fully connected live peers.
+ *   connecting: Number of peers currently connecting (queued + connecting).
+ *   ratio:      Upload ratio (uploaded / downloaded).
+ *   speedBps:   Current download speed in bytes per second.
+ *   state:      Torrent state string ("initializing" | "live" | "paused" | "error").
+ *   name:       Resolved torrent name, or null while resolving.
  */
-export function updateTorrentProgress(id, downloaded, total, peers, ratio, speedBps, state) {
+export function updateTorrentProgress(id, downloaded, total, peers, connecting, ratio, speedBps, state, name) {
   const card = document.querySelector(`.download-card[data-id="${id}"][data-type="torrent"]`)
   if (!card) return
 
@@ -99,6 +101,13 @@ export function updateTorrentProgress(id, downloaded, total, peers, ratio, speed
   const speedEl = card.querySelector('.card-speed')
   const peersEl = card.querySelector('.card-peers')
   const ratioEl = card.querySelector('.card-ratio')
+  const nameEl = card.querySelector('.card-name')
+
+  // Update card name once metadata resolves.
+  if (name && nameEl && nameEl.textContent === 'Resolving magnet\u2026') {
+    nameEl.textContent = escHtml(name)
+    nameEl.title = escHtml(name)
+  }
 
   if (total > 0) {
     fill.classList.remove('progress-fill--indeterminate')
@@ -107,11 +116,27 @@ export function updateTorrentProgress(id, downloaded, total, peers, ratio, speed
   } else {
     fill.style.width = ''
     fill.classList.add('progress-fill--indeterminate')
-    statusEl.textContent = state === 'initializing' ? 'Initializing\u2026' : formatBytes(downloaded)
+    if (state === 'initializing') {
+      statusEl.textContent = 'Resolving metadata\u2026'
+    } else if (state === 'live') {
+      statusEl.textContent = 'Connecting\u2026'
+    } else {
+      statusEl.textContent = formatBytes(downloaded)
+    }
   }
 
   speedEl.textContent = speedBps > 1024 ? `\u2193 ${formatBytes(speedBps)}/s` : ''
-  peersEl.textContent = `${peers} peer${peers !== 1 ? 's' : ''}`
+
+  // Show connecting count during init so user can see DHT activity.
+  const totalPeerActivity = peers + connecting
+  if (peers > 0) {
+    peersEl.textContent = `${peers} peer${peers !== 1 ? 's' : ''}`
+  } else if (connecting > 0) {
+    peersEl.textContent = `${connecting} connecting\u2026`
+  } else {
+    peersEl.textContent = totalPeerActivity === 0 ? 'finding peers\u2026' : `${totalPeerActivity} peers`
+  }
+
   ratioEl.textContent = `ratio: ${ratio.toFixed(2)}`
 }
 
@@ -222,9 +247,11 @@ export async function subscribeToTorrentEvents(id) {
         payload.downloaded,
         payload.total,
         payload.peers,
+        payload.connecting,
         payload.ratio,
         payload.speed_bps,
         payload.state,
+        payload.name ?? null,
       )
       if (payload.state === 'paused') setTorrentCardPaused(id)
     },
