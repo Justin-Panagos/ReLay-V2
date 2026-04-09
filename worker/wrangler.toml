@@ -8,8 +8,12 @@ id = "<KV_NAMESPACE_ID>"       # fill in after: wrangler kv:namespace create REL
 preview_id = "<KV_PREVIEW_ID>" # fill in after: wrangler kv:namespace create RELAY_LICENCES --preview
 
 # Secrets — set via `wrangler secret put <NAME>`:
-#   PAYSTACK_SECRET_KEY     — Paystack secret key from Dashboard → Settings → API Keys
-#   WORKER_PRIVATE_KEY_PEM  — PKCS#8 PEM of the Ed25519 key that is a canister controller
-#                             Generate: dfx identity new worker-identity
-#                                       dfx identity export worker-identity
-#   IDENTITY_CANISTER_ID    — principal of the deployed identity canister
+#   PAYSTACK_SECRET_KEY      — Paystack secret key from Dashboard → Settings → API Keys
+#   WORKER_PRIVATE_KEY_PEM   — PKCS#8 PEM of the Ed25519 key that is a canister controller
+#                              Generate: dfx identity new worker-identity
+#                                        dfx identity export worker-identity
+#   IDENTITY_CANISTER_ID     — principal of the deployed identity canister
+#   PATTERN_CANISTER_ID      — principal of the deployed pattern canister
+#   PAYSTACK_MONTHLY_PLAN    — Paystack plan code for $15/month API feed
+#   PAYSTACK_ANNUAL_PLAN     — Paystack plan code for $120/year API feed
+#   PAYSTACK_ENTERPRISE_PLAN — Paystack plan code for $500/year enterprise feed

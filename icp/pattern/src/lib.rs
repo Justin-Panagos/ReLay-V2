@@ -130,4 +130,23 @@ fn submit_pattern(sha256: String, threat_level: String, source: String) -> u64 {
     })
 }
 
+/// Returns every entry in the ledger in ascending id order.
+/// Used by the Cloudflare Worker to service snapshot export requests.
+/// The Worker gates access via snapshot token validation before calling this.
+/// Access level intentionally matches get_delta_since — both are public queries.
+///
+/// Known scaling limit: ICP query responses cap at ~2 MB. At max_size 512 bytes
+/// per PatternEntry that is approximately 4,000 entries. Add pagination if needed.
+///
+/// Returns:
+///   vec PatternEntry — all entries from id 0 to the latest, in ascending order.
+#[ic_cdk::query]
+fn get_full_export() -> Vec<PatternEntry> {
+    LEDGER.with(|v| {
+        let ledger = v.borrow();
+        let len = ledger.len();
+        (0..len).filter_map(|i| ledger.get(i)).collect()
+    })
+}
+
 ic_cdk::export_candid!();
