@@ -3,6 +3,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/tauri'
+import { showErrorToast } from './toast.js'
 
 /**
  * Initialises the Settings tab.
@@ -43,7 +44,31 @@ export async function initSettings() {
   await loadProStatus()
 
   document.getElementById('pro-upgrade-btn')?.addEventListener('click', async () => {
-    await invoke('open_upgrade_page').catch(err => console.error('open_upgrade_page:', err))
+    const emailEl = document.getElementById('pro-email-input')
+    const email = emailEl?.value.trim() ?? ''
+    if (!email) {
+      emailEl?.focus()
+      return
+    }
+    await invoke('open_upgrade_page', { email }).catch(err => {
+      console.error('open_upgrade_page:', err)
+      showErrorToast(`Could not open upgrade page: ${err}`)
+    })
+  })
+
+  document.getElementById('pro-cancel-btn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('pro-cancel-btn')
+    if (!confirm('Cancel your Pro subscription? You will lose access at the end of the current billing period.')) return
+    if (btn) btn.disabled = true
+    try {
+      await invoke('cancel_subscription')
+      await loadProStatus()
+    } catch (err) {
+      console.error('cancel_subscription:', err)
+      showErrorToast(`Could not cancel subscription: ${err}`)
+    } finally {
+      if (btn) btn.disabled = false
+    }
   })
 
   document.getElementById('pro-recheck-btn')?.addEventListener('click', async () => {
@@ -76,7 +101,9 @@ async function loadProStatus() {
   const statusEl  = document.getElementById('pro-status-value')
   const expiryEl  = document.getElementById('pro-expiry-value')
   const deviceEl  = document.getElementById('pro-device-id')
-  const upgradeRow = document.getElementById('pro-upgrade-row')
+  const upgradeRow    = document.getElementById('pro-upgrade-row')
+  const upgradeBtnRow = document.getElementById('pro-upgrade-btn-row')
+  const cancelRow     = document.getElementById('pro-cancel-row')
 
   if (statusEl) {
     statusEl.textContent = isPro ? 'Pro' : 'Free'
@@ -97,4 +124,6 @@ async function loadProStatus() {
   }
 
   upgradeRow?.classList.toggle('hidden', isPro)
+  upgradeBtnRow?.classList.toggle('hidden', isPro)
+  cancelRow?.classList.toggle('hidden', !isPro)
 }

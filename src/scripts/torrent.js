@@ -7,6 +7,7 @@
 import { invoke } from '@tauri-apps/api/tauri'
 import { appWindow } from '@tauri-apps/api/window'
 import { formatBytes, escHtml } from './utils.js'
+import { showErrorToast } from './toast.js'
 
 /** @type {Map<number, { name: string, destination: string, fileBytes?: number[] }>} */
 const torrentCardData = new Map()
@@ -58,7 +59,12 @@ export function addTorrentCard(id, name, destination = '') {
 
   card.querySelector('.card-pause').addEventListener('click', async (e) => {
     e.stopPropagation()
-    try { await invoke('pause_torrent', { id }) } catch { /* no-op */ }
+    try {
+      await invoke('pause_torrent', { id })
+    } catch (err) {
+      console.error(`pause_torrent(${id}) failed:`, err)
+      showErrorToast(`Pause failed: ${err}`)
+    }
   })
 
   card.querySelector('.card-resume').addEventListener('click', async (e) => {
@@ -66,12 +72,20 @@ export function addTorrentCard(id, name, destination = '') {
     try {
       await invoke('resume_torrent', { id })
       setTorrentCardResuming(id)
-    } catch { /* no-op */ }
+    } catch (err) {
+      console.error(`resume_torrent(${id}) failed:`, err)
+      showErrorToast(`Resume failed: ${err}`)
+    }
   })
 
   card.querySelector('.card-cancel').addEventListener('click', async (e) => {
     e.stopPropagation()
-    try { await invoke('cancel_torrent', { id }) } catch { /* no-op */ }
+    try {
+      await invoke('cancel_torrent', { id })
+    } catch (err) {
+      console.error(`cancel_torrent(${id}) failed:`, err)
+      showErrorToast(`Cancel failed: ${err}`)
+    }
   })
 
   document.getElementById('torrents-list').prepend(card)

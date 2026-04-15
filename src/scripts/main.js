@@ -6,6 +6,7 @@
 
 import { invoke } from '@tauri-apps/api/tauri'
 import { listen } from '@tauri-apps/api/event'
+import { showErrorToast } from './toast.js'
 import {
   addDownloadCard,
   updateProgress,
@@ -49,6 +50,23 @@ async function init() {
   try {
     await invoke('reset_stale_downloads')
   } catch { /* non-fatal */ }
+
+  // Wire the ICP offline banner.
+  const banner    = document.getElementById('icp-banner')
+  const bannerMsg = document.getElementById('icp-banner-msg')
+  document.getElementById('icp-banner-close')?.addEventListener('click', () => {
+    banner?.classList.add('hidden')
+  })
+  listen('icp://status', ({ payload }) => {
+    if (!banner || !bannerMsg) return
+    if (payload.connected) {
+      banner.classList.add('hidden')
+    } else {
+      bannerMsg.textContent = payload.message ?? 'ICP network unreachable — licence and pattern updates paused.'
+      banner.classList.remove('hidden')
+    }
+  }).catch(() => { /* non-fatal if event system not ready */ })
+
   initTorrentDrop()
   initCommunity()
   await Promise.all([loadHistory(), loadPausedDownloads(), loadTorrents(), loadQuarantine(), initSettings(), loadCommunity()])
@@ -60,53 +78,20 @@ init()
 
 /**
  * Subscribes to all backend events for a download id and wires up card updates.
- * Returns an unlisten function that removes all listeners.
+ * Returns a cleanup function that removes all active listeners.
+ * All unlisten variables are initialised as no-ops so cleanup() is always safe
+ * to call even if some listen() calls failed partway through.
  *
  * Args:
  *   id: The download id to subscribe to.
  */
 async function subscribeToDownloadEvents(id) {
-  const unlistenProgress = await listen(`download://progress/${id}`, (e) => {
-    updateProgress(id, e.payload.downloaded, e.payload.total ?? null, e.payload.speed_bps ?? 0)
-  })
-
-  const unlistenComplete = await listen(`download://complete/${id}`, async (e) => {
-    setCardComplete(id, e.payload.path)
-    activeDownloads.delete(id)
-    cleanup()
-    await loadHistory()
-  })
-
-  const unlistenError = await listen(`download://error/${id}`, async (e) => {
-    setCardError(id, e.payload.message)
-    activeDownloads.delete(id)
-    cleanup()
-    await loadHistory()
-  })
-
-  const unlistenPaused = await listen(`download://paused/${id}`, async () => {
-    setCardPaused(id)
-    activeDownloads.delete(id)
-    cleanup()
-  })
-
-  const unlistenScan = await listen(`download://scan/${id}`, () => {
-    setCardScanning(id)
-  })
-
-  const unlistenQuarantine = await listen(`download://quarantine/${id}`, async (e) => {
-    setCardQuarantined(id, e.payload.reason)
-    activeDownloads.delete(id)
-    cleanup()
-    // Switch to the Quarantine tab so the user sees the threat immediately.
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'))
-    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'))
-    const quarTab = document.querySelector('.tab[data-tab="quarantine"]')
-    if (quarTab) quarTab.classList.add('active')
-    const quarPane = document.getElementById('tab-quarantine')
-    if (quarPane) quarPane.classList.add('active')
-    await loadQuarantine()
-  })
+  let unlistenProgress   = () => {}
+  let unlistenComplete   = () => {}
+  let unlistenError      = () => {}
+  let unlistenPaused     = () => {}
+  let unlistenScan       = () => {}
+  let unlistenQuarantine = () => {}
 
   /** Removes all event listeners for this download. */
   function cleanup() {
@@ -116,6 +101,53 @@ async function subscribeToDownloadEvents(id) {
     unlistenPaused()
     unlistenScan()
     unlistenQuarantine()
+  }
+
+  try {
+    unlistenProgress = await listen(`download://progress/${id}`, (e) => {
+      updateProgress(id, e.payload.downloaded, e.payload.total ?? null, e.payload.speed_bps ?? 0)
+    })
+
+    unlistenComplete = await listen(`download://complete/${id}`, async (e) => {
+      setCardComplete(id, e.payload.path)
+      activeDownloads.delete(id)
+      cleanup()
+      await loadHistory()
+    })
+
+    unlistenError = await listen(`download://error/${id}`, async (e) => {
+      setCardError(id, e.payload.message)
+      activeDownloads.delete(id)
+      cleanup()
+      await loadHistory()
+    })
+
+    unlistenPaused = await listen(`download://paused/${id}`, async () => {
+      setCardPaused(id)
+      activeDownloads.delete(id)
+      cleanup()
+    })
+
+    unlistenScan = await listen(`download://scan/${id}`, () => {
+      setCardScanning(id)
+    })
+
+    unlistenQuarantine = await listen(`download://quarantine/${id}`, async (e) => {
+      setCardQuarantined(id, e.payload.reason)
+      activeDownloads.delete(id)
+      cleanup()
+      // Switch to the Quarantine tab so the user sees the threat immediately.
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'))
+      document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'))
+      const quarTab = document.querySelector('.tab[data-tab="quarantine"]')
+      if (quarTab) quarTab.classList.add('active')
+      const quarPane = document.getElementById('tab-quarantine')
+      if (quarPane) quarPane.classList.add('active')
+      await loadQuarantine()
+    })
+  } catch (err) {
+    console.error(`Failed to subscribe to download events for ${id}:`, err)
+    // Any listeners that did register before the failure are cleaned up correctly.
   }
 
   return cleanup
@@ -149,6 +181,7 @@ async function startDownload(url) {
     id = await invoke('start_download', { url })
   } catch (err) {
     console.error('start_download failed:', err)
+    showErrorToast(`Download failed to start: ${err}`)
     return
   }
 
@@ -197,6 +230,7 @@ async function resumeDownload(id) {
     await invoke('resume_download', { id })
   } catch (err) {
     console.error('resume_download failed:', err)
+    showErrorToast(`Resume failed: ${err}`)
     return
   }
 
@@ -249,7 +283,21 @@ proPrompt.querySelector('.pro-prompt-dismiss')?.addEventListener('click', () => 
 })
 
 proPrompt.querySelector('.pro-prompt-upgrade')?.addEventListener('click', async () => {
-  await invoke('open_upgrade_page').catch(err => console.error('open_upgrade_page:', err))
+  const email = document.getElementById('pro-email-input')?.value.trim() ?? ''
+  if (!email) {
+    // Route to Settings so the user can enter their email first.
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'))
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'))
+    document.querySelector('.tab[data-tab="settings"]')?.classList.add('active')
+    document.getElementById('tab-settings')?.classList.add('active')
+    document.getElementById('pro-email-input')?.focus()
+    proPrompt.classList.add('hidden')
+    return
+  }
+  await invoke('open_upgrade_page', { email }).catch(err => {
+    console.error('open_upgrade_page:', err)
+    showErrorToast(`Could not open upgrade page: ${err}`)
+  })
 })
 
 // ── Tab switching ─────────────────────────────────────────────────────────────

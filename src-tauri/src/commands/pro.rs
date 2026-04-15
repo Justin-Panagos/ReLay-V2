@@ -1,5 +1,6 @@
 use crate::db::{self, DbState};
 use crate::icp::{agent, ConfigState};
+use crate::pro::{self, LicenceCacheState};
 use tauri::{Manager, State};
 
 /// Licence info returned to the frontend for display in Settings → Pro.
@@ -13,24 +14,27 @@ pub struct ProStatus {
     pub device_id: String,
 }
 
-/// Returns the current licence status, expiry, and device ID from local settings.
-/// Reads from the SQLite settings table — does not make a network call.
+/// Returns the current licence status, expiry, and device ID.
+/// Status and expiry are read from the in-memory licence cache (ICP-verified).
+/// Device ID is read from SQLite (stable identifier, not security-sensitive).
 ///
 /// Args:
-///   db: Tauri-managed database state.
+///   cache: Tauri-managed in-memory licence cache.
+///   db:    Tauri-managed database state (for device_id only).
 ///
 /// Returns:
-///   ProStatus with values read from the settings table.
+///   ProStatus with values read from the cache and settings table.
 #[tauri::command]
-pub fn get_pro_status(db: State<'_, DbState>) -> Result<ProStatus, String> {
+pub fn get_pro_status(
+    cache: State<'_, LicenceCacheState>,
+    db: State<'_, DbState>,
+) -> Result<ProStatus, String> {
+    let (status, expiry_timestamp) = {
+        let lock = cache.0.lock().unwrap_or_else(|p| p.into_inner());
+        let exp = if lock.expiry > 0 { Some(lock.expiry) } else { None };
+        (lock.status.clone(), exp)
+    };
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let status = db::get_setting(&conn, "licence_status")
-        .map_err(|e| e.to_string())?
-        .unwrap_or_else(|| "free".to_string());
-    let expiry_timestamp = db::get_setting(&conn, "licence_expiry")
-        .map_err(|e| e.to_string())?
-        .and_then(|s| s.parse::<u64>().ok())
-        .filter(|&ts| ts > 0);
     let device_id = db::get_setting(&conn, "device_id")
         .map_err(|e| e.to_string())?
         .unwrap_or_default();
@@ -47,6 +51,7 @@ pub fn get_pro_status(db: State<'_, DbState>) -> Result<ProStatus, String> {
 /// the completed payment back to this device.
 ///
 /// Args:
+///   email:  The user's email address for the Paystack payment page.
 ///   db:     Tauri-managed database state (reads device_id).
 ///   config: Tauri-managed ICP config state (reads worker_url).
 ///   client: Shared reqwest HTTP client.
@@ -56,11 +61,16 @@ pub fn get_pro_status(db: State<'_, DbState>) -> Result<ProStatus, String> {
 ///   Ok(()) on success, Err(message) on any failure.
 #[tauri::command]
 pub async fn open_upgrade_page(
+    email: String,
     db: State<'_, DbState>,
     config: State<'_, ConfigState>,
     client: State<'_, reqwest::Client>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
+    if email.is_empty() {
+        return Err("email is required to start checkout".to_string());
+    }
+
     let device_id = {
         let conn = db.0.lock().map_err(|e| e.to_string())?;
         db::get_setting(&conn, "device_id")
@@ -78,7 +88,7 @@ pub async fn open_upgrade_page(
 
     let resp = client
         .post(format!("{worker_url}/init-checkout"))
-        .json(&serde_json::json!({ "device_id": device_id }))
+        .json(&serde_json::json!({ "device_id": device_id, "email": email }))
         .send()
         .await
         .map_err(|e| format!("could not reach payment server: {e}"))?;
@@ -97,11 +107,67 @@ pub async fn open_upgrade_page(
         .map_err(|e| e.to_string())
 }
 
-/// Re-checks the licence status against the ICP Identity Canister and updates
-/// `licence_status` and `licence_expiry` in the local settings table.
+/// Cancels the user's active Pro subscription via the Cloudflare Worker.
+/// The Worker calls the Paystack disable API; the resulting subscription.disable webhook
+/// will revoke the licence on ICP. This command also immediately updates the local
+/// in-memory cache to "free" so the UI reflects the change without waiting for the webhook.
+///
+/// Args:
+///   cache:  Tauri-managed in-memory licence cache.
+///   db:     Tauri-managed database state (reads device_id and worker_url).
+///   config: Tauri-managed ICP config state (reads worker_url).
+///   client: Shared reqwest HTTP client.
+///
+/// Returns:
+///   Ok(()) on success, Err(message) on any failure.
+#[tauri::command]
+pub async fn cancel_subscription(
+    cache: State<'_, LicenceCacheState>,
+    db: State<'_, DbState>,
+    config: State<'_, ConfigState>,
+    client: State<'_, reqwest::Client>,
+) -> Result<(), String> {
+    let device_id = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        db::get_setting(&conn, "device_id")
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "device_id not set".to_string())?
+    };
+
+    let worker_url = config
+        .0
+        .worker_url
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "worker_url not set in config.toml".to_string())?
+        .to_string();
+
+    let resp = client
+        .post(format!("{worker_url}/cancel-subscription"))
+        .json(&serde_json::json!({ "device_id": device_id }))
+        .send()
+        .await
+        .map_err(|e| format!("could not reach payment server: {e}"))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("cancellation failed: {}", resp.status()));
+    }
+
+    // Update cache immediately — the webhook will also revoke via ICP shortly after.
+    pro::update_licence_cache(&cache, "free", 0);
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    db::set_setting(&conn, "licence_status", "free").map_err(|e| e.to_string())?;
+    db::set_setting(&conn, "licence_expiry", "0").map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Re-checks the licence status against the ICP Identity Canister, updates the
+/// in-memory licence cache (the authoritative source for gate checks), and persists
+/// the result to SQLite for the next startup.
 /// Used by the "Re-check" button in Settings → Pro after a user upgrades.
 ///
 /// Args:
+///   cache:  Tauri-managed in-memory licence cache.
 ///   db:     Tauri-managed database state.
 ///   config: Tauri-managed ICP config state.
 ///
@@ -109,6 +175,7 @@ pub async fn open_upgrade_page(
 ///   Ok(()) on success. ICP network errors are returned as Err strings.
 #[tauri::command]
 pub async fn recheck_licence(
+    cache: State<'_, LicenceCacheState>,
     db: State<'_, DbState>,
     config: State<'_, ConfigState>,
 ) -> Result<(), String> {
@@ -126,7 +193,7 @@ pub async fn recheck_licence(
     let identity_id =
         agent::parse_principal(&icp.canisters.identity).map_err(|e| e.to_string())?;
 
-    let (status, expiry) =
+    let (status, expiry_u64) =
         match agent::check_licence(&a, &identity_id, device_id)
             .await
             .map_err(|e| e.to_string())?
@@ -137,16 +204,21 @@ pub async fn recheck_licence(
                     .map(|d| d.as_secs())
                     .unwrap_or(0);
                 if expiry_timestamp > now {
-                    ("pro".to_string(), expiry_timestamp.to_string())
+                    ("pro".to_string(), expiry_timestamp)
                 } else {
-                    ("free".to_string(), "0".to_string())
+                    ("free".to_string(), 0u64)
                 }
             }
-            agent::LicenceStatus::Free => ("free".to_string(), "0".to_string()),
+            agent::LicenceStatus::Free => ("free".to_string(), 0u64),
         };
 
+    // Update in-memory cache first — gate checks read from here.
+    pro::update_licence_cache(&cache, &status, expiry_u64);
+
+    // Persist to SQLite as a fallback seed for future restarts.
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     db::set_setting(&conn, "licence_status", &status).map_err(|e| e.to_string())?;
-    db::set_setting(&conn, "licence_expiry", &expiry).map_err(|e| e.to_string())?;
+    db::set_setting(&conn, "licence_expiry", &expiry_u64.to_string())
+        .map_err(|e| e.to_string())?;
     Ok(())
 }

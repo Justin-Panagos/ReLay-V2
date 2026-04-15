@@ -46,7 +46,7 @@ pub fn register_download(
 ) -> (CancellationToken, Arc<AtomicU8>) {
     let token = CancellationToken::new();
     let intent = Arc::new(AtomicU8::new(intent::NONE));
-    state.0.lock().unwrap().insert(
+    state.0.lock().unwrap_or_else(|p| p.into_inner()).insert(
         id,
         DownloadHandle {
             token: token.clone(),
@@ -66,7 +66,7 @@ pub fn register_download(
 /// Returns:
 ///   The removed handle, or None if id was not registered.
 pub fn deregister_download(state: &LifecycleState, id: i64) -> Option<DownloadHandle> {
-    state.0.lock().unwrap().remove(&id)
+    state.0.lock().unwrap_or_else(|p| p.into_inner()).remove(&id)
 }
 
 /// Pops the next queued download id from `QueueState` and spawns its download task.
@@ -81,7 +81,7 @@ pub fn try_start_next(app: tauri::AppHandle) {
 
     let next_id = {
         let queue = app.state::<QueueState>();
-        let id = queue.0.lock().unwrap().pop_front();
+        let id = queue.0.lock().unwrap_or_else(|p| p.into_inner()).pop_front();
         id
     };
 
@@ -90,7 +90,7 @@ pub fn try_start_next(app: tauri::AppHandle) {
     // Load the download record so we have url / destination / filename.
     let record = {
         let db = app.state::<DbState>();
-        let conn = db.0.lock().unwrap();
+        let conn = db.0.lock().unwrap_or_else(|p| p.into_inner());
         db::get_download_by_id(&conn, id).ok().flatten()
     };
 

@@ -5,6 +5,7 @@ use tauri::Manager;
 use crate::db::{self, DbState};
 use crate::icp::agent::{self, IcpError, LicenceStatus};
 use crate::icp::AppConfig;
+use crate::pro::{self, LicenceCacheState};
 
 /// Runs once at app startup:
 ///   1. Ensures a UUID v4 device_id exists in settings (generates one if absent).
@@ -23,7 +24,7 @@ pub async fn run_startup(app: tauri::AppHandle, config: AppConfig) {
     // ── Step 1: ensure device_id ────────────────────────────────────────────
     let device_id = {
         let db_state = app.state::<DbState>();
-        let conn = db_state.0.lock().unwrap();
+        let conn = db_state.0.lock().unwrap_or_else(|p| p.into_inner());
         match db::get_setting(&conn, "device_id")
             .ok()
             .flatten()
@@ -31,7 +32,14 @@ pub async fn run_startup(app: tauri::AppHandle, config: AppConfig) {
             Some(id) => id,
             None => {
                 let id = uuid::Uuid::new_v4().to_string();
-                db::set_setting(&conn, "device_id", &id).ok();
+                if let Err(e) = db::set_setting(&conn, "device_id", &id) {
+                    eprintln!("[icp] FATAL: could not persist device_id: {e}");
+                    app.emit_all("icp://status", serde_json::json!({
+                        "connected": false,
+                        "message": "Could not save device identity — restart the app."
+                    })).ok();
+                    return;
+                }
                 id
             }
         }
@@ -42,6 +50,10 @@ pub async fn run_startup(app: tauri::AppHandle, config: AppConfig) {
         Ok(a) => a,
         Err(e) => {
             eprintln!("[icp] could not build agent: {e}");
+            app.emit_all("icp://status", serde_json::json!({
+                "connected": false,
+                "message": "ICP network unreachable — licence and pattern updates paused."
+            })).ok();
             return;
         }
     };
@@ -67,21 +79,35 @@ pub async fn run_startup(app: tauri::AppHandle, config: AppConfig) {
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
             let status = if expiry_timestamp > now { "pro" } else { "free" };
+            // Update in-memory cache first — this is the source of truth.
+            if let Some(cache) = app.try_state::<LicenceCacheState>() {
+                pro::update_licence_cache(&cache, status, expiry_timestamp);
+            }
             let db_state = app.state::<DbState>();
-            let conn = db_state.0.lock().unwrap();
+            let conn = db_state.0.lock().unwrap_or_else(|p| p.into_inner());
             db::set_setting(&conn, "licence_status", status).ok();
             db::set_setting(&conn, "licence_expiry", &expiry_timestamp.to_string()).ok();
         }
         Ok(LicenceStatus::Free) => {
+            if let Some(cache) = app.try_state::<LicenceCacheState>() {
+                pro::update_licence_cache(&cache, "free", 0);
+            }
             let db_state = app.state::<DbState>();
-            let conn = db_state.0.lock().unwrap();
+            let conn = db_state.0.lock().unwrap_or_else(|p| p.into_inner());
             db::set_setting(&conn, "licence_status", "free").ok();
         }
         Err(e) => {
             eprintln!("[icp] check_licence failed: {e}");
-            // Do not overwrite existing licence_status — fall through silently.
+            app.emit_all("icp://status", serde_json::json!({
+                "connected": false,
+                "message": "ICP network unreachable — licence and pattern updates paused."
+            })).ok();
+            // Do not overwrite existing licence_status or cache — fall through silently.
         }
     }
+
+    // Emit connected:true after a successful licence check.
+    app.emit_all("icp://status", serde_json::json!({ "connected": true })).ok();
 
     // ── Step 4: first pattern sync ──────────────────────────────────────────
     if let Err(e) = sync_patterns_once(&app, &config).await {
@@ -125,7 +151,7 @@ async fn sync_patterns_once(app: &tauri::AppHandle, config: &AppConfig) -> Resul
 
     // Read last_pattern_id — lock, read, release immediately.
     let since_id: u64 = {
-        let conn = db_state.0.lock().unwrap();
+        let conn = db_state.0.lock().unwrap_or_else(|p| p.into_inner());
         db::get_setting(&conn, "last_pattern_id")
             .ok()
             .flatten()
@@ -146,7 +172,7 @@ async fn sync_patterns_once(app: &tauri::AppHandle, config: &AppConfig) -> Resul
     let new_last_id = entries.last().map(|e| e.id).unwrap_or(since_id);
 
     {
-        let conn = db_state.0.lock().unwrap();
+        let conn = db_state.0.lock().unwrap_or_else(|p| p.into_inner());
         db::upsert_icp_patterns(&conn, &entries)
             .map_err(|e| IcpError::Decode(e.to_string()))?;
         db::set_setting(&conn, "last_pattern_id", &new_last_id.to_string())

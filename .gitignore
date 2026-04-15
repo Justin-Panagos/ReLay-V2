@@ -1,6 +1,7 @@
-# Rust
+# Rust build artifacts
 /target
-src-tauri/target
+src-tauri/target/
+icp/target/
 **/*.rs.bk
 
 # Node
@@ -9,7 +10,6 @@ dist/
 .npm/
 
 # Tauri build outputs
-src-tauri/target/
 bundle/
 
 # SQLite databases
@@ -21,11 +21,18 @@ bundle/
 .dfx/
 *.did.d.ts
 
-# Environment files
+# Cloudflare Wrangler
+.wrangler/
+
+# Environment and secrets
 .env
 .env.local
 .env.*.local
+config.toml
+
+# Claude Code project state
 .claude
+
 # OS files
 .DS_Store
 .DS_Store?
@@ -57,7 +64,7 @@ eicar*
 # Build tools
 .cache/
 
-# Private docs
+# Private / internal docs — not useful to contributors
 relay_investor_pitch.md
 relay_consolidated_plan.md
 BUILD_PLAN.md

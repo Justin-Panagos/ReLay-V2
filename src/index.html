@@ -25,6 +25,12 @@
         </div>
       </header>
 
+      <!-- ICP offline banner — shown when ICP network is unreachable -->
+      <div id="icp-banner" class="icp-banner hidden">
+        <span id="icp-banner-msg">ICP network unreachable — licence and pattern updates paused.</span>
+        <button id="icp-banner-close" class="btn-icon">&#10005;</button>
+      </div>
+
       <!-- URL input area -->
       <div id="input-area">
         <input id="url-input" type="text" placeholder="Paste or drop URL..." />
@@ -101,8 +107,16 @@
               <span id="pro-device-id" class="settings-value settings-device-id" title="">&#8212;</span>
             </div>
             <div class="settings-row" id="pro-upgrade-row">
+              <span class="settings-label">Email</span>
+              <input type="email" id="pro-email-input" class="settings-input" placeholder="your@email.com" />
+            </div>
+            <div class="settings-row" id="pro-upgrade-btn-row">
               <span class="settings-label">Upgrade</span>
-              <button id="pro-upgrade-btn" class="btn-primary">Upgrade to Pro &#8212; $5/mo</button>
+              <button id="pro-upgrade-btn" class="btn-primary">Upgrade to Pro &#8212; $15/mo</button>
+            </div>
+            <div class="settings-row hidden" id="pro-cancel-row">
+              <span class="settings-label">Subscription</span>
+              <button id="pro-cancel-btn" class="btn-secondary">Cancel subscription</button>
             </div>
             <div class="settings-row">
               <span class="settings-label">Licence</span>

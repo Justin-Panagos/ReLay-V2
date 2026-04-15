@@ -43,7 +43,7 @@ pub async fn start_download(
     // Free tier: max 1 active download (registry is empty when no download is running).
     let slot_free = {
         let lifecycle = app.state::<lifecycle::LifecycleState>();
-        let empty = lifecycle.0.lock().unwrap().is_empty();
+        let empty = lifecycle.0.lock().unwrap_or_else(|p| p.into_inner()).is_empty();
         empty
     };
 
@@ -56,7 +56,7 @@ pub async fn start_download(
         ));
     } else {
         let queue = app.state::<lifecycle::QueueState>();
-        queue.0.lock().unwrap().push_back(id);
+        queue.0.lock().unwrap_or_else(|p| p.into_inner()).push_back(id);
     }
 
     Ok(id)
@@ -109,7 +109,7 @@ pub fn pause_download(
     id: i64,
     lifecycle: State<'_, lifecycle::LifecycleState>,
 ) -> Result<(), String> {
-    let guard = lifecycle.0.lock().unwrap();
+    let guard = lifecycle.0.lock().unwrap_or_else(|p| p.into_inner());
     if let Some(handle) = guard.get(&id) {
         handle.intent.store(lifecycle::intent::PAUSE, Ordering::Relaxed);
         handle.token.cancel();
@@ -147,7 +147,7 @@ pub fn cancel_download(
 ) -> Result<(), String> {
     // Case 1: actively downloading — fire token, task handles all cleanup.
     {
-        let guard = lifecycle.0.lock().unwrap();
+        let guard = lifecycle.0.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(handle) = guard.get(&id) {
             handle.intent.store(lifecycle::intent::CANCEL, Ordering::Relaxed);
             handle.token.cancel();
@@ -157,7 +157,7 @@ pub fn cancel_download(
 
     // Case 2: in the FIFO queue — remove it so it never starts.
     {
-        let mut q = queue.0.lock().unwrap();
+        let mut q = queue.0.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(pos) = q.iter().position(|&x| x == id) {
             q.remove(pos);
         }
@@ -219,7 +219,7 @@ pub async fn resume_download(
 ) -> Result<(), String> {
     // Reject if another download is already active.
     {
-        let guard = lifecycle.0.lock().unwrap();
+        let guard = lifecycle.0.lock().unwrap_or_else(|p| p.into_inner());
         if !guard.is_empty() {
             return Err("Another download is already active".to_string());
         }

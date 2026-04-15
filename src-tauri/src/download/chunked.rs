@@ -164,7 +164,14 @@ pub async fn download_chunked(
         .map(|s| s.written_bytes)
         .unwrap_or(0);
     let (chunk0_start, chunk0_end) = chunk_plan[0];
-    let chunk0_bytes_to_read = chunk0_end - chunk0_start + 1 - chunk0_written;
+    let chunk0_size = chunk0_end - chunk0_start + 1;
+    if chunk0_written > chunk0_size {
+        return Err(format!(
+            "corrupted resume snapshot: chunk 0 written_bytes ({chunk0_written}) \
+             exceeds chunk size ({chunk0_size}) — restarting download from scratch"
+        ));
+    }
+    let chunk0_bytes_to_read = chunk0_size - chunk0_written;
 
     if chunk0_bytes_to_read > 0 {
         set.spawn(download_chunk_from_stream(

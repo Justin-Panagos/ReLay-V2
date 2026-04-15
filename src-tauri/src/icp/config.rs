@@ -31,17 +31,17 @@ pub struct ConfigState(pub AppConfig);
 ///   app_data_dir: Path to the OS-specific app data directory.
 ///
 /// Returns:
-///   Parsed AppConfig. Panics with a clear message if the file is absent or malformed.
-pub fn load_config(app_data_dir: &Path) -> AppConfig {
+///   Ok(AppConfig) on success.
+///   Err(String) with a user-readable message if the file is absent or malformed.
+pub fn load_config(app_data_dir: &Path) -> Result<AppConfig, String> {
     let path = app_data_dir.join("config.toml");
-    let contents = std::fs::read_to_string(&path).unwrap_or_else(|_| {
-        panic!(
-            "config.toml not found at {} — copy config.toml.example from the repo root \
-             and fill in canister IDs before launching",
+    let contents = std::fs::read_to_string(&path).map_err(|_| {
+        format!(
+            "config.toml not found at {}.\n\nCopy config.toml.example from the repo root \
+             and fill in your canister IDs before launching.",
             path.display()
         )
-    });
-    toml::from_str(&contents).unwrap_or_else(|e| {
-        panic!("failed to parse config.toml at {}: {e}", path.display())
-    })
+    })?;
+    toml::from_str(&contents)
+        .map_err(|e| format!("config.toml at {} is invalid:\n\n{e}", path.display()))
 }

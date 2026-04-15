@@ -91,7 +91,7 @@ pub async fn download_file_resume(
     let (record, snapshots) = {
         let db = app.try_state::<DbState>();
         let Some(db) = db else { return };
-        let conn = db.0.lock().unwrap();
+        let conn = db.0.lock().unwrap_or_else(|p| p.into_inner());
         let record = match db::get_download_by_id(&conn, id) {
             Ok(Some(r)) => r,
             _ => return,
@@ -204,26 +204,34 @@ async fn handle_outcome(
                 }
                 shield::FinalVerdict::Quarantined { reason } => {
                     let quar_path = quarantine_path(file_path);
-                    if let Some(parent) = quar_path.parent() {
-                        std::fs::create_dir_all(parent).ok();
-                    }
-                    std::fs::rename(file_path, &quar_path).ok();
 
-                    if let Some(db) = app.try_state::<DbState>() {
-                        if let Ok(conn) = db.0.lock() {
-                            db::update_download_status(&conn, id, "quarantined").ok();
-                            db::update_download_scan_threat(&conn, id, &reason).ok();
-                            db::delete_chunk_snapshots(&conn, id).ok();
-                            db::insert_quarantine(
-                                &conn,
-                                id,
-                                &result.sha256,
-                                filename,
-                                &file_path.to_string_lossy(),
-                                &quar_path.to_string_lossy(),
-                                &reason,
-                            )
-                            .ok();
+                    // Write to DB first — if the DB write fails the file stays put and
+                    // no orphan is created. Only move the file after a successful insert.
+                    let db_ok = if let Some(db) = app.try_state::<DbState>() {
+                        let conn = db.0.lock().unwrap_or_else(|p| p.into_inner());
+                        db::update_download_status(&conn, id, "quarantined").ok();
+                        db::update_download_scan_threat(&conn, id, &reason).ok();
+                        db::delete_chunk_snapshots(&conn, id).ok();
+                        db::insert_quarantine(
+                            &conn,
+                            id,
+                            &result.sha256,
+                            filename,
+                            &file_path.to_string_lossy(),
+                            &quar_path.to_string_lossy(),
+                            &reason,
+                        )
+                        .is_ok()
+                    } else {
+                        false
+                    };
+
+                    if db_ok {
+                        if let Some(parent) = quar_path.parent() {
+                            std::fs::create_dir_all(parent).ok();
+                        }
+                        if let Err(e) = std::fs::rename(file_path, &quar_path) {
+                            eprintln!("[shield] file move failed after DB write: {e} — file remains at original path");
                         }
                     }
                     app.emit_all(
@@ -348,8 +356,8 @@ async fn run_download(
 
     // Pro users get 16 parallel chunks; Free users get 8.
     let max_chunks = if app
-        .try_state::<DbState>()
-        .and_then(|db| db.0.lock().ok().map(|conn| crate::pro::is_pro(&conn)))
+        .try_state::<crate::pro::LicenceCacheState>()
+        .map(|cache| crate::pro::is_pro(&cache))
         .unwrap_or(false)
     {
         chunked::PRO_TIER_CHUNKS

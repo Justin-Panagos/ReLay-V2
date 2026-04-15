@@ -6,6 +6,7 @@
 
 import { invoke } from '@tauri-apps/api/tauri'
 import { formatBytes, escHtml } from './utils.js'
+import { showErrorToast } from './toast.js'
 
 /**
  * Loads all quarantine entries from the backend and renders them in the
@@ -81,6 +82,7 @@ function buildQuarantineCard(record) {
       btn.textContent = '\u2713'
     } catch (err) {
       console.error('submit_zero_day failed:', err)
+      showErrorToast(`Submit failed: ${err}`)
       btn.disabled = false
     }
   })
@@ -93,6 +95,7 @@ function buildQuarantineCard(record) {
       checkEmpty()
     } catch (err) {
       console.error('restore_quarantine failed:', err)
+      showErrorToast(`Restore failed: ${err}`)
     }
   })
 
@@ -104,6 +107,7 @@ function buildQuarantineCard(record) {
       checkEmpty()
     } catch (err) {
       console.error('delete_quarantine failed:', err)
+      showErrorToast(`Delete failed: ${err}`)
     }
   })
 

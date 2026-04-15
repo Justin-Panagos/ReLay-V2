@@ -5,6 +5,7 @@
 
 import { invoke } from '@tauri-apps/api/tauri'
 import { escHtml } from './utils.js'
+import { showErrorToast } from './toast.js'
 
 /**
  * Wires the refresh button and the tab-switch listener so proposals reload
@@ -36,6 +37,8 @@ async function renderProposals() {
   const empty = document.getElementById('community-empty')
   if (!list || !empty) return
 
+  list.innerHTML = ''
+
   let proposals
   try {
     proposals = await invoke('get_proposals')
@@ -43,8 +46,6 @@ async function renderProposals() {
     console.error('get_proposals failed:', err)
     return
   }
-
-  list.innerHTML = ''
 
   if (proposals.length === 0) {
     empty.classList.remove('hidden')
@@ -109,17 +110,20 @@ function buildProposalCard(proposal) {
     </div>
   `
 
-  card.querySelector('.vote-approve-btn').addEventListener('click', async (e) => {
-    e.target.disabled = true
-    card.querySelector('.vote-reject-btn').disabled = true
-    await handleVote(proposal.id, true)
+  const approveBtn = card.querySelector('.vote-approve-btn')
+  const rejectBtn  = card.querySelector('.vote-reject-btn')
+
+  approveBtn.addEventListener('click', async () => {
+    approveBtn.disabled = true
+    rejectBtn.disabled = true
+    await handleVote(proposal.id, true, approveBtn, rejectBtn)
     await loadCommunity()
   })
 
-  card.querySelector('.vote-reject-btn').addEventListener('click', async (e) => {
-    e.target.disabled = true
-    card.querySelector('.vote-approve-btn').disabled = true
-    await handleVote(proposal.id, false)
+  rejectBtn.addEventListener('click', async () => {
+    rejectBtn.disabled = true
+    approveBtn.disabled = true
+    await handleVote(proposal.id, false, approveBtn, rejectBtn)
     await loadCommunity()
   })
 
@@ -127,16 +131,21 @@ function buildProposalCard(proposal) {
 }
 
 /**
- * Invokes the vote_proposal command. Errors are logged but non-fatal.
+ * Invokes the vote_proposal command. On failure, re-enables both buttons and shows a toast.
  *
  * Args:
  *   proposalId: The numeric proposal id.
  *   approve:    true to approve, false to reject.
+ *   approveBtn: The approve button element (re-enabled on failure).
+ *   rejectBtn:  The reject button element (re-enabled on failure).
  */
-async function handleVote(proposalId, approve) {
+async function handleVote(proposalId, approve, approveBtn, rejectBtn) {
   try {
     await invoke('vote_proposal', { proposalId, approve })
   } catch (err) {
     console.error('vote_proposal failed:', err)
+    showErrorToast(`Vote failed: ${err}`)
+    approveBtn.disabled = false
+    rejectBtn.disabled = false
   }
 }

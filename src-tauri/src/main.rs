@@ -12,9 +12,11 @@ mod torrent;
 use db::DbState;
 use download::lifecycle::{LifecycleState, QueueState};
 use icp::ConfigState;
+use pro::{LicenceCache, LicenceCacheState};
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use tauri::Manager;
 use torrent::{TorrentPollerState, TorrentSessionState};
 
@@ -27,7 +29,17 @@ fn main() {
                 .expect("could not resolve app data dir");
 
             let conn = db::init_db(dir.clone()).expect("failed to initialise database");
-            let icp_config = icp::config::load_config(&dir);
+            let icp_config = match icp::config::load_config(&dir) {
+                Ok(cfg) => cfg,
+                Err(msg) => {
+                    tauri::api::dialog::blocking::message(
+                        None::<&tauri::Window>,
+                        "Configuration Error",
+                        msg,
+                    );
+                    std::process::exit(1);
+                }
+            };
 
             // Read default_folder for the torrent session output directory.
             let torrent_output: PathBuf = db::get_setting(&conn, "default_folder")
@@ -55,6 +67,19 @@ fn main() {
             )
             .expect("failed to initialise torrent session");
 
+            // Seed the licence cache from the last persisted ICP-verified value.
+            // The cache is marked stale (86401s ago) so run_startup() always triggers
+            // a live ICP check; the seed merely avoids a blank UI during that check.
+            let seed_status = db::get_setting(&conn, "licence_status")
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| "free".to_string());
+            let seed_expiry = db::get_setting(&conn, "licence_expiry")
+                .ok()
+                .flatten()
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(0);
+
             app.manage(ConfigState(icp_config.clone()));
             app.manage(
                 reqwest::Client::builder()
@@ -62,6 +87,12 @@ fn main() {
                     .build()
                     .expect("failed to build HTTP client"),
             );
+            app.manage(LicenceCacheState(Mutex::new(LicenceCache {
+                status: seed_status,
+                expiry: seed_expiry,
+                // Force stale so run_startup() immediately issues a live ICP check.
+                verified_at: Instant::now() - Duration::from_secs(86_401),
+            })));
             app.manage(DbState(Mutex::new(conn)));
             app.manage(LifecycleState(Mutex::new(HashMap::new())));
             app.manage(QueueState(Mutex::new(VecDeque::new())));
@@ -103,6 +134,7 @@ fn main() {
             commands::icp::vote_proposal,
             commands::pro::get_pro_status,
             commands::pro::open_upgrade_page,
+            commands::pro::cancel_subscription,
             commands::pro::recheck_licence,
         ])
         .run(tauri::generate_context!())

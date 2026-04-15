@@ -57,7 +57,11 @@ pub async fn scan(
 
     // ── Step 3: optional VirusTotal lookup ────────────────────────────────────
     if let Some(key) = vt_key {
-        match check_virustotal(&sha256, key).await {
+        let client = app
+            .try_state::<reqwest::Client>()
+            .map(|s| s.inner().clone())
+            .unwrap_or_else(reqwest::Client::new);
+        match check_virustotal(&sha256, key, &client).await {
             Ok(Some(reason)) => {
                 return LayerResult {
                     layer: 1,
@@ -66,8 +70,17 @@ pub async fn scan(
                 };
             }
             Ok(None) => {}
-            Err(_) => {
-                // VT unreachable — treat as Clean to avoid blocking downloads
+            Err(e) => {
+                eprintln!("[shield] VirusTotal lookup failed: {e}");
+                // VT error (rate-limit, bad key, network) — do not treat as Clean silently.
+                // Return Suspicious so the scan log shows the failure.
+                return LayerResult {
+                    layer: 1,
+                    name: "Hash",
+                    verdict: LayerVerdict::Suspicious {
+                        reason: format!("VirusTotal check failed: {e}"),
+                    },
+                };
             }
         }
     }
@@ -100,39 +113,41 @@ fn compute_sha256(path: &std::path::Path) -> Result<String, std::io::Error> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-/// Queries the VirusTotal v3 API for a file hash report.
-/// Returns `Some(reason)` if the file is flagged as malicious, `None` if clean,
-/// or an error if the request fails.
+/// Queries the VirusTotal v3 API for a file hash report using the provided shared client.
+/// Returns `Some(reason)` if the file is flagged as malicious, `None` if clean or not found,
+/// or an error if the request fails or VT returns a non-success/non-404 status.
 ///
 /// Args:
-///   sha256: Hex-encoded SHA-256 of the file.
+///   sha256:  Hex-encoded SHA-256 of the file.
 ///   api_key: VirusTotal API key.
+///   client:  Shared reqwest client (avoids a new TLS handshake per call).
 ///
 /// Returns:
 ///   Ok(Some(reason)) if malicious detections > 0.
-///   Ok(None) if the hash is clean or not found (404).
-///   Err on network failure.
+///   Ok(None) if the hash is not found (404) or clean.
+///   Err on network failure or non-success/non-404 HTTP status (rate-limit, bad key, etc.).
 async fn check_virustotal(
     sha256: &str,
     api_key: &str,
-) -> Result<Option<String>, reqwest::Error> {
-    let client = reqwest::Client::new();
+    client: &reqwest::Client,
+) -> Result<Option<String>, String> {
     let url = format!("https://www.virustotal.com/api/v3/files/{sha256}");
     let resp = client
         .get(&url)
         .header("x-apikey", api_key)
         .send()
-        .await?;
+        .await
+        .map_err(|e| e.to_string())?;
 
     if resp.status().as_u16() == 404 {
         return Ok(None);
     }
 
     if !resp.status().is_success() {
-        return Ok(None);
+        return Err(format!("VirusTotal API error: HTTP {}", resp.status()));
     }
 
-    let json: serde_json::Value = resp.json().await?;
+    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
     let malicious = json
         .pointer("/data/attributes/last_analysis_stats/malicious")
         .and_then(|v| v.as_u64())

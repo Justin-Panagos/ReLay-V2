@@ -319,7 +319,7 @@ pub fn spawn_progress_poller(
 
                     // Update DB with latest progress.
                     if let Some(db_state) = app.try_state::<DbState>() {
-                        let conn = db_state.0.lock().unwrap();
+                        let conn = db_state.0.lock().unwrap_or_else(|p| p.into_inner());
                         let _ = db::update_downloaded_bytes(
                             &conn,
                             db_id,
@@ -381,7 +381,7 @@ pub fn spawn_progress_poller(
                     // Check terminal states.
                     if stats.finished {
                         if let Some(db_state) = app.try_state::<DbState>() {
-                            let conn = db_state.0.lock().unwrap();
+                            let conn = db_state.0.lock().unwrap_or_else(|p| p.into_inner());
                             let _ = db::update_download_status(&conn, db_id, "complete");
                         }
                         let _ = app.emit_all(
@@ -396,7 +396,7 @@ pub fn spawn_progress_poller(
                             .error
                             .unwrap_or_else(|| "unknown torrent error".to_string());
                         if let Some(db_state) = app.try_state::<DbState>() {
-                            let conn = db_state.0.lock().unwrap();
+                            let conn = db_state.0.lock().unwrap_or_else(|p| p.into_inner());
                             let _ = db::update_download_status(&conn, db_id, "failed");
                         }
                         let _ = app.emit_all(

@@ -66,14 +66,14 @@ pub async fn add_magnet(
         {
             Ok(torrent_id) => {
                 if let Some(db_state) = app2.try_state::<DbState>() {
-                    let conn = db_state.0.lock().unwrap();
+                    let conn = db_state.0.lock().unwrap_or_else(|p| p.into_inner());
                     let _ = db::update_torrent_id(&conn, db_id, torrent_id);
                     let _ = db::update_download_status(&conn, db_id, "downloading");
                 }
             }
             Err(e) => {
                 if let Some(db_state) = app2.try_state::<DbState>() {
-                    let conn = db_state.0.lock().unwrap();
+                    let conn = db_state.0.lock().unwrap_or_else(|p| p.into_inner());
                     let _ = db::update_download_status(&conn, db_id, "failed");
                 }
                 let _ = app2.emit_all(
@@ -170,14 +170,14 @@ pub async fn add_torrent_file(
         {
             Ok(torrent_id) => {
                 if let Some(db_state) = app2.try_state::<DbState>() {
-                    let conn = db_state.0.lock().unwrap();
+                    let conn = db_state.0.lock().unwrap_or_else(|p| p.into_inner());
                     let _ = db::update_torrent_id(&conn, db_id, torrent_id);
                     let _ = db::update_download_status(&conn, db_id, "downloading");
                 }
             }
             Err(e) => {
                 if let Some(db_state) = app2.try_state::<DbState>() {
-                    let conn = db_state.0.lock().unwrap();
+                    let conn = db_state.0.lock().unwrap_or_else(|p| p.into_inner());
                     let _ = db::update_download_status(&conn, db_id, "failed");
                 }
                 let _ = app2.emit_all(
@@ -254,7 +254,7 @@ pub async fn cancel_torrent(
     pollers: State<'_, TorrentPollerState>,
 ) -> Result<(), String> {
     // Cancel the progress poller first.
-    if let Some(token) = pollers.0.lock().unwrap().remove(&id) {
+    if let Some(token) = pollers.0.lock().unwrap_or_else(|p| p.into_inner()).remove(&id) {
         token.cancel();
     }
 

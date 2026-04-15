@@ -349,8 +349,9 @@ async function handleInitCheckout(request, env) {
   } catch {
     return new Response('invalid JSON body', { status: 400 })
   }
-  const { device_id } = body
+  const { device_id, email } = body
   if (!device_id) return new Response('missing device_id', { status: 400 })
+  if (!email) return new Response('missing email', { status: 400 })
 
   const resp = await fetch('https://api.paystack.co/transaction/initialize', {
     method: 'POST',
@@ -359,7 +360,7 @@ async function handleInitCheckout(request, env) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      email: `${device_id}@relay.app`,
+      email,
       amount: 50000,
       currency: 'ZAR',
       metadata: { device_id, type: 'pro' },
@@ -563,7 +564,12 @@ async function handleWebhook(request, env) {
         if (!deviceId) return new Response('missing device_id in metadata', { status: 400 })
         const subCode = event.data.subscription?.subscription_code
         if (subCode) {
+          // If the sub code is already in KV this is a renewal — invoice.payment handles it.
+          const existing = await env.RELAY_LICENCES.get(`sub:${subCode}`)
+          if (existing) return new Response('ok', { status: 200 })
           await env.RELAY_LICENCES.put(`sub:${subCode}`, deviceId)
+          // Reverse lookup: device_id → sub_code for in-app cancellation.
+          await env.RELAY_LICENCES.put(`sub_lookup:${deviceId}`, subCode)
         }
         const expiry = Math.floor(Date.now() / 1000) + 31 * 24 * 60 * 60
         await callGrantProWithTimeout(agent, identityId, deviceId, expiry)
@@ -777,6 +783,58 @@ async function handleApiCallback(request, env) {
 
 // ── Main router ──────────────────────────────────────────────────────────────
 
+/**
+ * Cancels a Pro subscription on behalf of a device.
+ * Looks up the subscription code by device_id, calls the Paystack Subscription disable
+ * endpoint to cancel it, and lets the subsequent subscription.disable webhook revoke
+ * the licence on ICP.
+ *
+ * Args:
+ *   request: Incoming POST request with JSON body { device_id }.
+ *   env:     Worker environment bindings (PAYSTACK_SECRET_KEY, RELAY_LICENCES KV).
+ *
+ * Returns:
+ *   JSON { ok: true } on success, error Response otherwise.
+ */
+async function handleCancelSubscription(request, env) {
+  let body
+  try {
+    body = await request.json()
+  } catch {
+    return new Response('invalid JSON body', { status: 400 })
+  }
+  const { device_id } = body
+  if (!device_id) return new Response('missing device_id', { status: 400 })
+
+  const subCode = await env.RELAY_LICENCES.get(`sub_lookup:${device_id}`)
+  if (!subCode) return new Response('no active subscription found', { status: 404 })
+
+  // Retrieve the subscription to get the email_token required by Paystack's disable endpoint.
+  const subResp = await fetch(`https://api.paystack.co/subscription/${subCode}`, {
+    headers: { Authorization: `Bearer ${env.PAYSTACK_SECRET_KEY}` },
+  })
+  const subJson = await subResp.json()
+  if (!subJson.status) return new Response('could not retrieve subscription details', { status: 502 })
+
+  const emailToken = subJson.data?.email_token
+  if (!emailToken) return new Response('subscription has no email_token', { status: 502 })
+
+  const disableResp = await fetch('https://api.paystack.co/subscription/disable', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${env.PAYSTACK_SECRET_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ code: subCode, token: emailToken }),
+  })
+  const disableJson = await disableResp.json()
+  if (!disableJson.status) return new Response('Paystack disable failed', { status: 502 })
+
+  return new Response(JSON.stringify({ ok: true }), {
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
 export default {
   /**
    * Main Worker fetch handler.
@@ -794,10 +852,11 @@ export default {
     const method = request.method
     const path   = url.pathname
 
-    if (method === 'POST' && path === '/init-checkout')     return handleInitCheckout(request, env)
-    if (method === 'POST' && path === '/snapshot-checkout') return handleSnapshotCheckout(request, env)
-    if (method === 'POST' && path === '/api-checkout')      return handleApiCheckout(request, env)
-    if (method === 'POST' && path === '/webhook')           return handleWebhook(request, env)
+    if (method === 'POST' && path === '/init-checkout')          return handleInitCheckout(request, env)
+    if (method === 'POST' && path === '/snapshot-checkout')      return handleSnapshotCheckout(request, env)
+    if (method === 'POST' && path === '/api-checkout')           return handleApiCheckout(request, env)
+    if (method === 'POST' && path === '/cancel-subscription')    return handleCancelSubscription(request, env)
+    if (method === 'POST' && path === '/webhook')                return handleWebhook(request, env)
     if (method === 'GET'  && path === '/api/export')        return handleApiExport(request, env)
     if (method === 'GET'  && path === '/api/delta')         return handleApiDelta(request, env)
     if (method === 'GET'  && path === '/api/callback')      return handleApiCallback(request, env)

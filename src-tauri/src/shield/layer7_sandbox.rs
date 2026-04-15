@@ -63,18 +63,35 @@ pub async fn scan(ctx: &ScanContext) -> (LayerResult, Option<SandboxReport>) {
                    (deny file-write*)\n\
                    (deny network*)";
 
-    // Run under sandbox-exec with a 45-second hard timeout.
-    let run_result = tokio::time::timeout(
-        Duration::from_secs(45),
-        tokio::process::Command::new("sandbox-exec")
-            .args(["-p", profile, &path_str])
-            .output(),
-    )
-    .await;
+    // Spawn under sandbox-exec with a 45-second hard timeout.
+    // Use spawn() + wait() so we hold the child handle and can kill it on timeout.
+    let mut child = match tokio::process::Command::new("sandbox-exec")
+        .args(["-p", profile, &path_str])
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[shield] sandbox-exec spawn failed: {e}");
+            return (
+                LayerResult {
+                    layer: 7,
+                    name: "Sandbox",
+                    verdict: LayerVerdict::Suspicious {
+                        reason: format!("sandbox-exec unavailable: {e}"),
+                    },
+                },
+                None,
+            );
+        }
+    };
 
-    // Ignore the process exit code — we care about violations, not whether the
-    // file ran successfully (it almost certainly won't under such restrictions).
-    let _ = run_result;
+    match tokio::time::timeout(Duration::from_secs(45), child.wait()).await {
+        Ok(_) => {}
+        Err(_) => {
+            // Timed out — kill the process so it doesn't linger.
+            child.kill().await.ok();
+        }
+    }
 
     // Query the unified log for sandbox denials in the last 2 minutes.
     let (syscalls_blocked, network_attempts, file_writes) = query_log_violations().await;
@@ -203,22 +220,33 @@ fn is_executable(path: &std::path::Path) -> bool {
     false
 }
 
-/// Stub for non-macOS platforms — sandbox scanning is unsupported.
-/// Returns Clean immediately so the pipeline can continue normally.
+/// Stub for non-macOS platforms — sandbox scanning requires sandbox-exec (macOS only).
+/// Returns a Suspicious verdict with an "unsupported" note so the scan log shows the
+/// layer was skipped rather than silently passing, which would be a false Clean signal.
 ///
 /// Args:
 ///   _ctx: Scan context (unused on non-macOS).
 ///
 /// Returns:
-///   (LayerResult with Clean verdict, None).
+///   (LayerResult with Suspicious verdict, Some(SandboxReport with platform="unsupported")).
 #[cfg(not(target_os = "macos"))]
 pub async fn scan(_ctx: &ScanContext) -> (LayerResult, Option<SandboxReport>) {
+    let report = SandboxReport {
+        syscalls_blocked: 0,
+        network_attempts: 0,
+        file_writes: 0,
+        verdict: "unsupported".to_string(),
+        platform: "unsupported".to_string(),
+        notes: "Sandbox scanning requires macOS sandbox-exec — skipped on this platform.".to_string(),
+    };
     (
         LayerResult {
             layer: 7,
             name: "Sandbox",
-            verdict: LayerVerdict::Clean,
+            verdict: LayerVerdict::Suspicious {
+                reason: "Sandbox layer skipped (non-macOS platform)".to_string(),
+            },
         },
-        None,
+        Some(report),
     )
 }

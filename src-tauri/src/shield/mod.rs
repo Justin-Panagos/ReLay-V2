@@ -181,8 +181,8 @@ pub async fn run_pipeline(
         == Some("true");
 
     let pro_ok = app
-        .try_state::<DbState>()
-        .and_then(|db| db.0.lock().ok().map(|conn| crate::pro::is_pro(&conn)))
+        .try_state::<crate::pro::LicenceCacheState>()
+        .map(|cache| crate::pro::is_pro(&cache))
         .unwrap_or(false);
 
     if sandbox_enabled && pro_ok {
