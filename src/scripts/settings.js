@@ -11,6 +11,22 @@ import { showErrorToast } from './toast.js'
  * persist updates immediately via set_setting. Also loads and renders the Pro panel.
  */
 export async function initSettings() {
+  // ── Appearance — theme ────────────────────────────────────────────────────
+  const themeEl = document.getElementById('setting-theme')
+  if (themeEl) {
+    const savedTheme = await invoke('get_setting', { key: 'theme' }).catch(() => null)
+    themeEl.value = savedTheme ?? 'auto'
+    themeEl.addEventListener('change', async () => {
+      const theme = themeEl.value
+      await invoke('set_setting', { key: 'theme', value: theme }).catch(() => {})
+      if (theme === 'auto') {
+        document.documentElement.removeAttribute('data-theme')
+      } else {
+        document.documentElement.setAttribute('data-theme', theme)
+      }
+    })
+  }
+
   // ── Shield settings ───────────────────────────────────────────────────────
   const [sandboxEnabled, vtKey] = await Promise.all([
     invoke('get_setting', { key: 'sandbox_enabled' }).catch(() => null),
@@ -108,8 +124,8 @@ async function loadProStatus() {
   if (statusEl) {
     statusEl.textContent = isPro ? 'Pro' : 'Free'
     statusEl.style.color = isPro
-      ? 'var(--color-success)'
-      : 'var(--color-text-muted)'
+      ? 'var(--accent-green)'
+      : 'var(--text-muted)'
   }
 
   if (expiryEl) {

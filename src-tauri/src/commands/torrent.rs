@@ -31,6 +31,14 @@ pub async fn add_magnet(
 ) -> Result<i64, String> {
     let dest = resolve_destination(&db, destination)?;
 
+    // Reject duplicate magnet already active or queued.
+    {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        if db::torrent_exists_for_url(&conn, &magnet) {
+            return Err("A torrent with this magnet link is already active or queued.".to_string());
+        }
+    }
+
     let db_id = {
         let conn = db.0.lock().map_err(|e| e.to_string())?;
         db::insert_torrent(&conn, &magnet, "Resolving...", &dest)
@@ -41,7 +49,7 @@ pub async fn add_magnet(
     pollers
         .0
         .lock()
-        .unwrap()
+        .unwrap_or_else(|p| p.into_inner())
         .insert(db_id, cancel_token.clone());
 
     // Extract the Arc<Session> — State<'_, T> has a tied lifetime and cannot
@@ -147,7 +155,7 @@ pub async fn add_torrent_file(
     pollers
         .0
         .lock()
-        .unwrap()
+        .unwrap_or_else(|p| p.into_inner())
         .insert(db_id, cancel_token.clone());
 
     let session_arc = session.0.clone();
@@ -208,6 +216,7 @@ pub async fn pause_torrent(
     db: State<'_, DbState>,
     session: State<'_, TorrentSessionState>,
 ) -> Result<(), String> {
+    eprintln!("[torrent] pause_torrent id={id}");
     let torrent_id = get_torrent_id(&db, id)?;
     torrent::pause_torrent(&session.0, torrent_id as usize).await?;
     let conn = db.0.lock().map_err(|e| e.to_string())?;
@@ -229,6 +238,7 @@ pub async fn resume_torrent(
     db: State<'_, DbState>,
     session: State<'_, TorrentSessionState>,
 ) -> Result<(), String> {
+    eprintln!("[torrent] resume_torrent id={id}");
     let torrent_id = get_torrent_id(&db, id)?;
     torrent::resume_torrent(&session.0, torrent_id as usize).await?;
     let conn = db.0.lock().map_err(|e| e.to_string())?;
@@ -253,6 +263,7 @@ pub async fn cancel_torrent(
     session: State<'_, TorrentSessionState>,
     pollers: State<'_, TorrentPollerState>,
 ) -> Result<(), String> {
+    eprintln!("[torrent] cancel_torrent id={id}");
     // Cancel the progress poller first.
     if let Some(token) = pollers.0.lock().unwrap_or_else(|p| p.into_inner()).remove(&id) {
         token.cancel();

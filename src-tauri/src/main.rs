@@ -5,6 +5,7 @@ mod commands;
 mod db;
 mod download;
 mod icp;
+mod native_messaging;
 mod pro;
 mod shield;
 mod torrent;
@@ -21,6 +22,13 @@ use tauri::Manager;
 use torrent::{TorrentPollerState, TorrentSessionState};
 
 fn main() {
+    // Chrome spawns the binary with --native-messaging when the extension
+    // first connects.  Handle that mode before any Tauri initialisation.
+    if std::env::args().any(|a| a == "--native-messaging") {
+        native_messaging::run();
+        return;
+    }
+
     tauri::Builder::default()
         .setup(|app| {
             let dir = app
@@ -99,6 +107,12 @@ fn main() {
             app.manage(TorrentSessionState(torrent_session));
             app.manage(TorrentPollerState(Mutex::new(HashMap::new())));
 
+            // Write/update the Chrome Native Messaging host manifest on every
+            // launch so the path stays correct after app moves or updates.
+            if let Err(e) = native_messaging::install_host_manifest() {
+                eprintln!("[relay] native host manifest: {e}");
+            }
+
             // Spawn ICP startup: device registration, licence sync, pattern sync loop.
             let app_handle = app.handle();
             let config_for_startup = icp_config.clone();
@@ -136,6 +150,14 @@ fn main() {
             commands::pro::open_upgrade_page,
             commands::pro::cancel_subscription,
             commands::pro::recheck_licence,
+            commands::developer::get_stored_api_credentials,
+            commands::developer::api_snapshot_checkout,
+            commands::developer::api_key_checkout,
+            commands::developer::poll_developer_status,
+            commands::developer::cancel_api_subscription,
+            commands::developer::download_threat_export,
+            commands::download::pick_folder,
+            commands::download::log_error,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ReLay");

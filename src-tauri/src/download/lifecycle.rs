@@ -56,6 +56,39 @@ pub fn register_download(
     (token, intent)
 }
 
+/// Atomically checks whether the registry is empty and, if so, registers the download.
+/// Returns `Some((token, intent))` if a slot was claimed, or `None` if occupied.
+/// This is the safe way to implement a 1-active limit without a TOCTOU race — callers
+/// must not split the emptiness check and the registration across two separate lock
+/// acquisitions.
+///
+/// Args:
+///   state: Reference to the LifecycleState managed by Tauri.
+///   id:    The download row id to register if a slot is free.
+///
+/// Returns:
+///   Some((CancellationToken, Arc<AtomicU8>)) if the slot was claimed, None otherwise.
+pub fn try_register_if_empty(
+    state: &LifecycleState,
+    id: i64,
+) -> Option<(CancellationToken, Arc<AtomicU8>)> {
+    let mut guard = state.0.lock().unwrap_or_else(|p| p.into_inner());
+    if guard.is_empty() {
+        let token = CancellationToken::new();
+        let intent = Arc::new(AtomicU8::new(intent::NONE));
+        guard.insert(
+            id,
+            DownloadHandle {
+                token: token.clone(),
+                intent: Arc::clone(&intent),
+            },
+        );
+        Some((token, intent))
+    } else {
+        None
+    }
+}
+
 /// Removes and returns the `DownloadHandle` for `id`.
 /// Called at the end of every `download_file` execution (all outcomes).
 ///

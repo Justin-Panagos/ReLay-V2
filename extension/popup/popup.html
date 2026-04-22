@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self';" />
+  <title>ReLay</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+
+  <!-- Install prompt — shown when the desktop app is not detected -->
+  <div id="install-prompt" class="hidden">
+    <div class="install-icon">&#8681;</div>
+    <p class="install-title">ReLay not installed</p>
+    <p class="install-sub">Install the desktop app to start managing your downloads.</p>
+    <a id="install-btn-mac"   class="install-btn hidden" href="#" target="_blank" rel="noopener">
+      Download for macOS
+    </a>
+    <a id="install-btn-win"   class="install-btn hidden" href="#" target="_blank" rel="noopener">
+      Download for Windows
+    </a>
+    <a id="install-btn-linux" class="install-btn hidden" href="#" target="_blank" rel="noopener">
+      Download for Linux
+    </a>
+  </div>
+
+  <!-- Downloads view — shown when connected to the desktop app -->
+  <div id="downloads-view">
+    <header class="popup-header">
+      <span class="popup-title">ReLay</span>
+      <span id="status-dot" class="dot dot-connected" title="Connected to ReLay"></span>
+    </header>
+
+    <div id="downloads-list">
+      <div id="empty-state" class="empty-state">No active downloads</div>
+    </div>
+
+    <footer class="popup-footer">
+      <a id="open-app-btn" href="#" class="footer-link">Open ReLay</a>
+    </footer>
+  </div>
+
+  <script src="popup.js" type="module"></script>
+</body>
+</html>

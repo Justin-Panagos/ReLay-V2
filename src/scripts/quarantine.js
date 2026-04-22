@@ -6,23 +6,30 @@
 
 import { invoke } from '@tauri-apps/api/tauri'
 import { formatBytes, escHtml } from './utils.js'
-import { showErrorToast } from './toast.js'
+import { showErrorToast, showInfoToast } from './toast.js'
+
+/** Maximum number of quarantine records to fetch. */
+const QUARANTINE_LIMIT = 200
 
 /**
  * Loads all quarantine entries from the backend and renders them in the
  * Quarantine tab. Shows or hides the empty state accordingly.
  */
 export async function loadQuarantine() {
-  let records
-  try {
-    records = await invoke('get_quarantine', { limit: 200 })
-  } catch {
-    return
-  }
-
   const list = document.getElementById('quarantine-list')
   const empty = document.getElementById('quarantine-empty')
   if (!list || !empty) return
+
+  list.innerHTML = '<div class="empty-state">Loading\u2026</div>'
+  empty.classList.add('hidden')
+
+  let records
+  try {
+    records = await invoke('get_quarantine', { limit: QUARANTINE_LIMIT })
+  } catch {
+    list.innerHTML = '<div class="empty-state">Failed to load quarantine \u2014 try again.</div>'
+    return
+  }
 
   list.innerHTML = ''
 
@@ -76,13 +83,19 @@ function buildQuarantineCard(record) {
   card.querySelector('.quar-submit').addEventListener('click', async (e) => {
     e.stopPropagation()
     const btn = e.target
+    const originalHtml = btn.innerHTML
     btn.disabled = true
+    btn.textContent = '\u2026'
     try {
       await invoke('submit_zero_day', { quarantineId: record.id })
-      btn.textContent = '\u2713'
+      showInfoToast('Submitted to community database')
+      btn.innerHTML = originalHtml
+      btn.disabled = true
+      btn.title = 'Already submitted'
     } catch (err) {
       console.error('submit_zero_day failed:', err)
       showErrorToast(`Submit failed: ${err}`)
+      btn.innerHTML = originalHtml
       btn.disabled = false
     }
   })

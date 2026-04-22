@@ -16,7 +16,7 @@ export function initCommunity() {
   document.getElementById('community-refresh-btn')
     ?.addEventListener('click', () => loadCommunity())
 
-  document.querySelector('.tab[data-tab="community"]')
+  document.querySelector('.panel-tab[data-panel-tab="community"]')
     ?.addEventListener('click', () => loadCommunity())
 }
 
@@ -37,15 +37,19 @@ async function renderProposals() {
   const empty = document.getElementById('community-empty')
   if (!list || !empty) return
 
-  list.innerHTML = ''
+  list.innerHTML = '<div class="empty-state">Loading\u2026</div>'
+  empty.classList.add('hidden')
 
   let proposals
   try {
     proposals = await invoke('get_proposals')
   } catch (err) {
     console.error('get_proposals failed:', err)
+    list.innerHTML = '<div class="empty-state">Failed to load proposals \u2014 try again.</div>'
     return
   }
+
+  list.innerHTML = ''
 
   if (proposals.length === 0) {
     empty.classList.remove('hidden')
@@ -116,6 +120,7 @@ function buildProposalCard(proposal) {
   approveBtn.addEventListener('click', async () => {
     approveBtn.disabled = true
     rejectBtn.disabled = true
+    approveBtn.textContent = 'Submitting\u2026'
     await handleVote(proposal.id, true, approveBtn, rejectBtn)
     await loadCommunity()
   })
@@ -123,6 +128,7 @@ function buildProposalCard(proposal) {
   rejectBtn.addEventListener('click', async () => {
     rejectBtn.disabled = true
     approveBtn.disabled = true
+    rejectBtn.textContent = 'Submitting\u2026'
     await handleVote(proposal.id, false, approveBtn, rejectBtn)
     await loadCommunity()
   })

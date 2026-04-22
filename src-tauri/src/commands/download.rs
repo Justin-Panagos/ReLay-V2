@@ -32,6 +32,14 @@ pub async fn start_download(
             .unwrap_or_else(|| ".".to_string())
     };
 
+    // Reject duplicate — same URL already queued, downloading, or paused.
+    {
+        let conn = state.0.lock().map_err(|e| e.to_string())?;
+        if db::download_exists_for_url(&conn, &url) {
+            return Err("A download for this URL is already active or queued.".to_string());
+        }
+    }
+
     // Insert download row — lock, insert, unlock immediately.
     let id = {
         let conn = state.0.lock().map_err(|e| e.to_string())?;
@@ -39,17 +47,11 @@ pub async fn start_download(
             .map_err(|e| e.to_string())?
     };
 
-    // Check whether a slot is free by looking at the lifecycle registry.
-    // Free tier: max 1 active download (registry is empty when no download is running).
-    let slot_free = {
-        let lifecycle = app.state::<lifecycle::LifecycleState>();
-        let empty = lifecycle.0.lock().unwrap_or_else(|p| p.into_inner()).is_empty();
-        empty
-    };
-
-    if slot_free {
-        let lifecycle = app.state::<lifecycle::LifecycleState>();
-        let (token, intent) = lifecycle::register_download(&lifecycle, id);
+    // Atomically check slot availability and register — both under the same lock —
+    // to prevent a TOCTOU race where two concurrent commands both see an empty
+    // registry and each spawn a download, violating the free-tier 1-active limit.
+    let lifecycle = app.state::<lifecycle::LifecycleState>();
+    if let Some((token, intent)) = lifecycle::try_register_if_empty(&lifecycle, id) {
         let app2 = app.clone();
         tokio::spawn(download::download_file(
             url, destination, filename, id, app2, token, intent,
@@ -229,4 +231,58 @@ pub async fn resume_download(
     tokio::spawn(download::download_file_resume(id, app, token, intent));
 
     Ok(())
+}
+
+/// Opens a native folder picker dialog and returns the selected path.
+/// Returns None if the user dismisses the dialog without selecting a folder.
+///
+/// Uses the async (callback-based) dialog API with a oneshot channel instead of
+/// the blocking variant. The blocking API dispatches to the main thread via an
+/// internal channel which can deadlock on macOS when called from a Tauri command
+/// handler thread — the async approach avoids that entirely.
+///
+/// Returns:
+///   Some(path) with the selected directory as a string, or None if cancelled.
+#[tauri::command]
+pub async fn pick_folder() -> Option<String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    tauri::api::dialog::FileDialogBuilder::new().pick_folder(move |path| {
+        let _ = tx.send(path.map(|p| p.to_string_lossy().to_string()));
+    });
+    rx.await.ok().flatten()
+}
+
+/// Appends a timestamped error entry to relay_errors.log in the app data directory.
+/// Called from the frontend whenever a user-triggered action fails, so errors are
+/// available for debugging even when the DevTools console is not open.
+///
+/// Args:
+///   app_handle: Tauri app handle used to resolve the app data directory.
+///   action:     Short description of the action that failed (e.g. "resume_download").
+///   message:    The error message string.
+///
+/// Returns:
+///   Ok(()) on success, Err if the log file cannot be written.
+#[tauri::command]
+pub fn log_error(
+    app_handle: tauri::AppHandle,
+    action: String,
+    message: String,
+) -> Result<(), String> {
+    let dir = app_handle
+        .path_resolver()
+        .app_data_dir()
+        .ok_or("no app data dir")?;
+    let path = dir.join("relay_errors.log");
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs().to_string())
+        .unwrap_or_else(|_| "0".to_string());
+    let line = format!("[{ts}] {action} \u{2014} {message}\n");
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()))
+        .map_err(|e| e.to_string())
 }

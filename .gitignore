@@ -24,6 +24,9 @@ bundle/
 # Cloudflare Wrangler
 .wrangler/
 
+# Chrome extension private key — never commit
+extension/extension_key.pem
+
 # Environment and secrets
 .env
 .env.local

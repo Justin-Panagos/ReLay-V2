@@ -6,6 +6,9 @@ import { invoke } from '@tauri-apps/api/tauri'
 import { open } from '@tauri-apps/api/shell'
 import { formatBytes, escHtml } from './utils.js'
 
+/** Maximum number of history records to fetch. */
+const HISTORY_LIMIT = 50
+
 /**
  * Loads recent downloads from the database and renders them in the History tab.
  * Clears existing content before re-rendering. Only shows terminal statuses
@@ -15,10 +18,13 @@ export async function loadHistory() {
   const container = document.getElementById('history-list')
   if (!container) return
 
+  container.innerHTML = '<div class="empty-state">Loading\u2026</div>'
+
   let records
   try {
-    records = await invoke('get_downloads', { limit: 50 })
+    records = await invoke('get_downloads', { limit: HISTORY_LIMIT })
   } catch {
+    container.innerHTML = '<div class="empty-state">Failed to load history \u2014 try again.</div>'
     return
   }
 
@@ -54,6 +60,9 @@ function renderHistoryCard(record) {
   const iconChar = isComplete ? '&#10003;' : '&#10005;'
   const statusText = isComplete ? 'Complete' : 'Failed'
   const sizeText = record.size_bytes ? ' \u00b7 ' + formatBytes(record.size_bytes) : ''
+  const durationText = (isComplete && record.completed_at && record.created_at)
+    ? ' \u00b7 ' + formatDuration(record.created_at, record.completed_at)
+    : ''
   const dateText = formatDate(record.completed_at || record.created_at)
   const safeName = escHtml(record.filename)
   const safeDest = escHtml(record.destination)
@@ -64,7 +73,7 @@ function renderHistoryCard(record) {
       <div class="card-body">
         <div class="card-name" title="${safeName}">${safeName}</div>
         <div class="card-meta">
-          <span>${statusText}${sizeText}</span>
+          <span>${statusText}${sizeText}${durationText}</span>
           <span>${dateText}</span>
         </div>
       </div>
@@ -73,6 +82,24 @@ function renderHistoryCard(record) {
       </div>
     </div>
   `
+}
+
+/**
+ * Formats the elapsed seconds between two Unix timestamp strings into a human-readable duration.
+ *
+ * Args:
+ *   startTs: Unix seconds string (created_at).
+ *   endTs:   Unix seconds string (completed_at).
+ *
+ * Returns:
+ *   String like "34s", "2m 5s", or "14m".
+ */
+function formatDuration(startTs, endTs) {
+  const s = Math.max(0, Number(endTs) - Number(startTs))
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  const rem = s % 60
+  return rem > 0 ? `${m}m ${rem}s` : `${m}m`
 }
 
 /**

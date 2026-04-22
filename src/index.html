@@ -21,6 +21,7 @@
         <span id="app-title">ReLay</span>
         <div id="app-bar-actions">
           <button class="btn-icon" id="menu-btn" title="Menu">&#8801;</button>
+          <button class="btn-icon" id="settings-btn" title="Settings">&#9881;</button>
           <button class="btn-icon" id="expand-btn" title="Expand panel">+</button>
         </div>
       </header>
@@ -35,8 +36,8 @@
       <div id="input-area">
         <input id="url-input" type="text" placeholder="Paste or drop URL..." />
         <div id="input-actions">
-          <button id="folder-btn">Browse...</button>
-          <button id="start-btn">Start</button>
+          <button id="folder-btn" title="Choose the folder where downloads are saved">Browse...</button>
+          <button id="start-btn" title="Start downloading the URL above">Start</button>
         </div>
       </div>
 
@@ -46,8 +47,6 @@
         <button class="tab" data-tab="history">History</button>
         <button class="tab" data-tab="torrent">Torrent</button>
         <button class="tab" data-tab="quarantine">Shield</button>
-        <button class="tab" data-tab="community">Community</button>
-        <button class="tab" data-tab="settings">Settings</button>
       </nav>
 
       <!-- Tab content -->
@@ -81,15 +80,6 @@
           <div id="quarantine-empty" class="empty-state">No threats detected</div>
         </div>
 
-        <div id="tab-community" class="tab-pane">
-          <div class="community-header">
-            <span class="community-rep-label">Reputation</span>
-            <span id="community-rep-score" class="community-rep-value">&#8212;</span>
-            <button id="community-refresh-btn" class="btn-icon" title="Refresh proposals">&#8635;</button>
-          </div>
-          <div id="community-proposals-list"></div>
-          <div id="community-empty" class="empty-state">No community proposals yet</div>
-        </div>
 
         <div id="tab-settings" class="tab-pane">
           <div class="settings-section">
@@ -112,7 +102,7 @@
             </div>
             <div class="settings-row" id="pro-upgrade-btn-row">
               <span class="settings-label">Upgrade</span>
-              <button id="pro-upgrade-btn" class="btn-primary">Upgrade to Pro &#8212; $15/mo</button>
+              <button id="pro-upgrade-btn" class="btn-primary">Upgrade to Pro &#8212; R95/mo</button>
             </div>
             <div class="settings-row hidden" id="pro-cancel-row">
               <span class="settings-label">Subscription</span>
@@ -122,6 +112,17 @@
               <span class="settings-label">Licence</span>
               <button id="pro-recheck-btn" class="btn-secondary">Re-check</button>
             </div>
+          </div>
+          <div class="settings-section">
+            <div class="settings-section-title">Appearance</div>
+            <label class="settings-row">
+              <span class="settings-label">Theme</span>
+              <select id="setting-theme" class="settings-input">
+                <option value="auto">System default</option>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </select>
+            </label>
           </div>
           <div class="settings-section">
             <div class="settings-section-title">Shield</div>
@@ -148,10 +149,138 @@
 
     <!-- Right detail panel (hidden until expanded) -->
     <div id="detail-panel" class="hidden">
-      <div class="detail-header">Detail</div>
-      <div class="detail-body">
-        <p>Select a download to see details</p>
+      <nav id="panel-tab-bar">
+        <button class="panel-tab active" data-panel-tab="detail">Detail</button>
+        <button class="panel-tab" data-panel-tab="community">Community</button>
+        <button class="panel-tab" data-panel-tab="developer">Developer</button>
+      </nav>
+
+      <div class="panel-pane active" id="panel-detail">
+        <div class="detail-body">
+          <p>Select a download to see details</p>
+        </div>
       </div>
+
+      <div class="panel-pane" id="panel-community">
+        <div class="community-header">
+          <span class="community-rep-label">Reputation</span>
+          <span id="community-rep-score" class="community-rep-value">&#8212;</span>
+          <button id="community-refresh-btn" class="btn-icon" title="Refresh proposals">&#8635;</button>
+        </div>
+        <div id="community-proposals-list"></div>
+        <div id="community-empty" class="empty-state">No community proposals yet</div>
+      </div>
+
+      <div class="panel-pane" id="panel-developer">
+
+        <!-- STATE 1: No credentials stored -->
+        <div id="dev-no-key">
+          <div class="settings-section">
+            <div class="settings-section-title">Threat Intelligence API</div>
+            <div class="settings-row">
+              <span class="settings-label">Email</span>
+              <input type="email" id="dev-email-input" class="settings-input"
+                     placeholder="your@email.com" />
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <div class="settings-section-title">One-Time Snapshot</div>
+            <div class="settings-row">
+              <span class="settings-label">Full database export</span>
+              <button id="dev-snapshot-btn" class="btn-primary">Get Export &#8212; R500</button>
+            </div>
+            <div class="dev-section-note">Single-use download token, valid 25 hours.</div>
+          </div>
+
+          <div class="settings-section">
+            <div class="settings-section-title">Ongoing API Feed</div>
+            <div class="settings-row">
+              <span class="settings-label">Developer</span>
+              <button class="btn-primary dev-plan-btn" data-plan="monthly">Subscribe &#8212; R8,000/mo</button>
+            </div>
+          </div>
+        </div><!-- /#dev-no-key -->
+
+        <!-- STATE 2: Waiting for payment -->
+        <div id="dev-polling" class="hidden">
+          <div class="settings-section">
+            <div class="dev-polling-body">
+              <span id="dev-polling-label">Waiting for payment</span><span class="dev-dots"></span>
+            </div>
+            <div id="dev-polling-plan" class="dev-section-note"></div>
+            <div class="settings-row">
+              <span class="settings-label"></span>
+              <button id="dev-polling-cancel" class="btn-secondary">Cancel</button>
+            </div>
+          </div>
+        </div><!-- /#dev-polling -->
+
+        <!-- STATE 3: API subscription active -->
+        <div id="dev-key-active" class="hidden">
+          <div class="settings-section">
+            <div class="settings-section-title">API Feed</div>
+            <div class="settings-row">
+              <span class="settings-label">Plan</span>
+              <span id="dev-plan-badge" class="settings-badge-pro"></span>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">Renews</span>
+              <span id="dev-expiry-value" class="settings-value">&#8212;</span>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">API Key</span>
+              <span class="dev-key-row">
+                <span id="dev-key-masked" class="dev-key-masked"
+                      title="Click copy to get the key">&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;</span>
+                <button id="dev-key-copy-btn" class="btn-secondary">Copy</button>
+              </span>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">Endpoint</span>
+              <input type="text" id="dev-endpoint-url" class="settings-input dev-endpoint-input"
+                     readonly />
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">Subscription</span>
+              <button id="dev-cancel-sub-btn" class="btn-secondary">Cancel subscription</button>
+            </div>
+          </div>
+        </div><!-- /#dev-key-active -->
+
+        <!-- STATE 4: Snapshot token active -->
+        <div id="dev-snapshot-active" class="hidden">
+          <div class="settings-section">
+            <div class="settings-section-title">Snapshot</div>
+            <div class="settings-row">
+              <span class="settings-label">Expires</span>
+              <span id="dev-snap-countdown" class="settings-value dev-countdown"></span>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">Format</span>
+              <span class="dev-format-group">
+                <label class="dev-format-opt">
+                  <input type="radio" name="dev-format" value="json" checked /> JSON
+                </label>
+                <label class="dev-format-opt">
+                  <input type="radio" name="dev-format" value="yara" /> YARA
+                </label>
+                <label class="dev-format-opt">
+                  <input type="radio" name="dev-format" value="csv" /> CSV
+                </label>
+              </span>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">Save to</span>
+              <button id="dev-download-btn" class="btn-primary">Download to disk</button>
+            </div>
+            <div class="dev-section-note dev-warn">
+              Single-use &#8212; once downloaded, this token cannot be used again.
+            </div>
+          </div>
+        </div><!-- /#dev-snapshot-active -->
+
+      </div><!-- /#panel-developer -->
     </div>
 
   </div><!-- /app -->

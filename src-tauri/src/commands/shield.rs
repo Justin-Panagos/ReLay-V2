@@ -32,10 +32,8 @@ pub fn get_quarantine(
 pub fn restore_quarantine(id: i64, db: State<'_, DbState>) -> Result<(), String> {
     let record = {
         let conn = db.0.lock().map_err(|e| e.to_string())?;
-        db::get_quarantine(&conn, 9999)
+        db::get_quarantine_by_id(&conn, id)
             .map_err(|e| e.to_string())?
-            .into_iter()
-            .find(|r| r.id == id)
             .ok_or_else(|| format!("quarantine entry {id} not found"))?
     };
 
@@ -66,10 +64,8 @@ pub fn restore_quarantine(id: i64, db: State<'_, DbState>) -> Result<(), String>
 pub fn delete_quarantine(id: i64, db: State<'_, DbState>) -> Result<(), String> {
     let record = {
         let conn = db.0.lock().map_err(|e| e.to_string())?;
-        db::get_quarantine(&conn, 9999)
+        db::get_quarantine_by_id(&conn, id)
             .map_err(|e| e.to_string())?
-            .into_iter()
-            .find(|r| r.id == id)
             .ok_or_else(|| format!("quarantine entry {id} not found"))?
     };
 

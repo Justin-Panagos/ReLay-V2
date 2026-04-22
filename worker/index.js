@@ -361,7 +361,7 @@ async function handleInitCheckout(request, env) {
     },
     body: JSON.stringify({
       email,
-      amount: 50000,
+      plan: env.PAYSTACK_PRO_PLAN,
       currency: 'ZAR',
       metadata: { device_id, type: 'pro' },
       callback_url: `${new URL(request.url).origin}/api/callback`,
@@ -406,7 +406,7 @@ async function handleSnapshotCheckout(request, env) {
     },
     body: JSON.stringify({
       email,
-      amount: 100000, // ZAR cents — R100 (~$10 USD at time of writing)
+      amount: 50000, // ZAR cents — R500
       currency: 'ZAR',
       metadata: { type: 'snapshot' },
       callback_url: `${workerOrigin}/api/callback`,
@@ -441,15 +441,13 @@ async function handleApiCheckout(request, env) {
   const { plan, email } = body
   if (!email) return new Response('missing email', { status: 400 })
 
-  const planAmounts = { monthly: 150000, annual: 1200000, enterprise: 5000000 }
+  const planAmounts = { monthly: 800000 }
   const planSecrets = {
-    monthly:    env.PAYSTACK_MONTHLY_PLAN,
-    annual:     env.PAYSTACK_ANNUAL_PLAN,
-    enterprise: env.PAYSTACK_ENTERPRISE_PLAN,
+    monthly: env.PAYSTACK_DEVELOPER_PLAN,
   }
   const amount = planAmounts[plan]
   const planCode = planSecrets[plan]
-  if (!amount || !planCode) return new Response('invalid plan — use monthly, annual, or enterprise', { status: 400 })
+  if (!amount || !planCode) return new Response('invalid plan — use monthly', { status: 400 })
 
   const workerOrigin = new URL(request.url).origin
   const resp = await fetch('https://api.paystack.co/transaction/initialize', {
@@ -527,7 +525,6 @@ async function handleWebhook(request, env) {
     return new Response('agent init error', { status: 500 })
   }
   const identityId = env.IDENTITY_CANISTER_ID
-  const patternId  = env.PATTERN_CANISTER_ID
 
   try {
     if (event.event === 'charge.success') {
@@ -541,6 +538,16 @@ async function handleWebhook(request, env) {
         await env.RELAY_LICENCES.put(`snap:${token}`, 'unused', { expirationTtl: ttl })
         // Map Paystack reference → token so /api/callback can look it up.
         await env.RELAY_LICENCES.put(`ref:${ref}`, JSON.stringify({ type: 'snapshot', token }), { expirationTtl: ttl })
+        // Map email → token so the desktop app can poll for it.
+        const snapEmail = event.data.customer?.email ?? ''
+        if (snapEmail) {
+          const expiryTs = Math.floor(Date.now() / 1000) + ttl
+          await env.RELAY_LICENCES.put(
+            `email_snap:${snapEmail}`,
+            JSON.stringify({ token, expiry: expiryTs }),
+            { expirationTtl: ttl }
+          )
+        }
 
       } else if (type === 'api_key') {
         // API feed subscription — generate persistent key.
@@ -557,6 +564,15 @@ async function handleWebhook(request, env) {
         // Map reference → key so /api/callback can display it.
         await env.RELAY_LICENCES.put(`ref:${ref}`, JSON.stringify({ type: 'api_key', apiKey }), { expirationTtl: 25 * 60 * 60 })
         await callGrantApiKey(agent, identityId, apiKey, expiry)
+        // Map email → key so the desktop app can poll for it.
+        const keyEmail = event.data.customer?.email ?? ''
+        if (keyEmail) {
+          await env.RELAY_LICENCES.put(`email_key:${keyEmail}`, JSON.stringify({ apiKey, plan, expiry }))
+          if (subCode) {
+            await env.RELAY_LICENCES.put(`api_sublookup:${apiKey}`, subCode)
+            await env.RELAY_LICENCES.put(`api_email:${subCode}`, keyEmail)
+          }
+        }
 
       } else {
         // Pro subscription (device_id present, no type or type === 'pro').
@@ -604,8 +620,16 @@ async function handleWebhook(request, env) {
       // Check if this is an API key cancellation.
       const apiKey = await env.RELAY_LICENCES.get(`api_sub:${subCode}`)
       if (apiKey) {
-        await env.RELAY_LICENCES.delete(`api:${apiKey}`)
+        const cancelEmail = await env.RELAY_LICENCES.get(`api_email:${subCode}`) ?? ''
         await callRevokeApiKey(agent, identityId, apiKey)
+        await Promise.all([
+          env.RELAY_LICENCES.delete(`api:${apiKey}`),
+          env.RELAY_LICENCES.delete(`api_sub:${subCode}`),
+          env.RELAY_LICENCES.delete(`api_plan:${subCode}`),
+          env.RELAY_LICENCES.delete(`api_sublookup:${apiKey}`),
+          env.RELAY_LICENCES.delete(`api_email:${subCode}`),
+          cancelEmail ? env.RELAY_LICENCES.delete(`email_key:${cancelEmail}`) : Promise.resolve(),
+        ])
         return new Response('ok', { status: 200 })
       }
 
@@ -631,11 +655,8 @@ async function handleWebhook(request, env) {
  * Returns:
  *   Unix seconds for the end of the billing period.
  */
-function expiryForPlan(plan) {
+function expiryForPlan(_plan) {
   const now = Math.floor(Date.now() / 1000)
-  if (plan === 'annual' || plan === 'enterprise') {
-    return now + 365 * 24 * 60 * 60
-  }
   return now + 31 * 24 * 60 * 60
 }
 
@@ -835,6 +856,105 @@ async function handleCancelSubscription(request, env) {
   })
 }
 
+/**
+ * Handles GET /api/key-status?email=EMAIL
+ * Returns the active API key details for a given email if a payment has completed.
+ * Used by the desktop app to poll for payment confirmation after checkout.
+ *
+ * Args:
+ *   request: Incoming GET request with email query param.
+ *   env:     Worker environment bindings (RELAY_LICENCES KV).
+ *
+ * Returns:
+ *   JSON { type, apiKey, plan, expiry } on success, 404 if not found.
+ */
+async function handleApiKeyStatus(request, env) {
+  const email = new URL(request.url).searchParams.get('email')
+  if (!email) return new Response('missing email', { status: 400 })
+  const raw = await env.RELAY_LICENCES.get(`email_key:${email}`)
+  if (!raw) return new Response('not found', { status: 404 })
+  return new Response(JSON.stringify({ type: 'api_key', ...JSON.parse(raw) }), {
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
+/**
+ * Handles GET /api/snap-status?email=EMAIL
+ * Returns the snapshot token details for a given email if a payment has completed.
+ * Used by the desktop app to poll for payment confirmation after checkout.
+ *
+ * Args:
+ *   request: Incoming GET request with email query param.
+ *   env:     Worker environment bindings (RELAY_LICENCES KV).
+ *
+ * Returns:
+ *   JSON { type, token, expiry } on success, 404 if not found.
+ */
+async function handleApiSnapStatus(request, env) {
+  const email = new URL(request.url).searchParams.get('email')
+  if (!email) return new Response('missing email', { status: 400 })
+  const raw = await env.RELAY_LICENCES.get(`email_snap:${email}`)
+  if (!raw) return new Response('not found', { status: 404 })
+  return new Response(JSON.stringify({ type: 'snapshot', ...JSON.parse(raw) }), {
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
+/**
+ * Handles POST /cancel-api-subscription
+ * Cancels a developer API subscription on behalf of the user.
+ * Looks up the subscription code by email, fetches the Paystack email_token,
+ * and calls the Paystack disable endpoint. KV cleanup happens in subscription.disable webhook.
+ *
+ * Args:
+ *   request: Incoming POST request with JSON body { email }.
+ *   env:     Worker environment bindings (PAYSTACK_SECRET_KEY, RELAY_LICENCES KV).
+ *
+ * Returns:
+ *   JSON { ok: true } on success, error Response otherwise.
+ */
+async function handleCancelApiSubscription(request, env) {
+  let body
+  try {
+    body = await request.json()
+  } catch {
+    return new Response('invalid JSON body', { status: 400 })
+  }
+  const { email } = body
+  if (!email) return new Response('missing email', { status: 400 })
+
+  const raw = await env.RELAY_LICENCES.get(`email_key:${email}`)
+  if (!raw) return new Response('no active API subscription found', { status: 404 })
+
+  const { apiKey } = JSON.parse(raw)
+  const subCode = await env.RELAY_LICENCES.get(`api_sublookup:${apiKey}`)
+  if (!subCode) return new Response('subscription code not found', { status: 404 })
+
+  const subResp = await fetch(`https://api.paystack.co/subscription/${subCode}`, {
+    headers: { Authorization: `Bearer ${env.PAYSTACK_SECRET_KEY}` },
+  })
+  const subJson = await subResp.json()
+  if (!subJson.status) return new Response('could not retrieve subscription details', { status: 502 })
+
+  const emailToken = subJson.data?.email_token
+  if (!emailToken) return new Response('subscription has no email_token', { status: 502 })
+
+  const disableResp = await fetch('https://api.paystack.co/subscription/disable', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${env.PAYSTACK_SECRET_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ code: subCode, token: emailToken }),
+  })
+  const disableJson = await disableResp.json()
+  if (!disableJson.status) return new Response('Paystack disable failed', { status: 502 })
+
+  return new Response(JSON.stringify({ ok: true }), {
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
 export default {
   /**
    * Main Worker fetch handler.
@@ -855,11 +975,14 @@ export default {
     if (method === 'POST' && path === '/init-checkout')          return handleInitCheckout(request, env)
     if (method === 'POST' && path === '/snapshot-checkout')      return handleSnapshotCheckout(request, env)
     if (method === 'POST' && path === '/api-checkout')           return handleApiCheckout(request, env)
-    if (method === 'POST' && path === '/cancel-subscription')    return handleCancelSubscription(request, env)
-    if (method === 'POST' && path === '/webhook')                return handleWebhook(request, env)
-    if (method === 'GET'  && path === '/api/export')        return handleApiExport(request, env)
-    if (method === 'GET'  && path === '/api/delta')         return handleApiDelta(request, env)
-    if (method === 'GET'  && path === '/api/callback')      return handleApiCallback(request, env)
+    if (method === 'POST' && path === '/cancel-subscription')      return handleCancelSubscription(request, env)
+    if (method === 'POST' && path === '/cancel-api-subscription') return handleCancelApiSubscription(request, env)
+    if (method === 'POST' && path === '/webhook')                 return handleWebhook(request, env)
+    if (method === 'GET'  && path === '/api/export')              return handleApiExport(request, env)
+    if (method === 'GET'  && path === '/api/delta')               return handleApiDelta(request, env)
+    if (method === 'GET'  && path === '/api/callback')            return handleApiCallback(request, env)
+    if (method === 'GET'  && path === '/api/key-status')          return handleApiKeyStatus(request, env)
+    if (method === 'GET'  && path === '/api/snap-status')         return handleApiSnapStatus(request, env)
     return new Response('not found', { status: 404 })
   },
 }

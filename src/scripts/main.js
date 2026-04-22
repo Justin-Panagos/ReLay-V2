@@ -6,6 +6,7 @@
 
 import { invoke } from '@tauri-apps/api/tauri'
 import { listen } from '@tauri-apps/api/event'
+import { getCurrent, PhysicalSize } from '@tauri-apps/api/window'
 import { showErrorToast } from './toast.js'
 import {
   addDownloadCard,
@@ -31,13 +32,25 @@ import {
 import { loadQuarantine } from './quarantine.js'
 import { initSettings } from './settings.js'
 import { initCommunity, loadCommunity } from './community.js'
+import { initDeveloper } from './developer.js'
 
 const urlInput = document.getElementById('url-input')
 const startBtn = document.getElementById('start-btn')
 const proPrompt = document.getElementById('pro-prompt')
 
+/** Minimum and maximum width of the resizable detail panel in pixels. */
+const PANEL_MIN_WIDTH = 180
+const PANEL_MAX_WIDTH = 500
+
+/** Maximum number of downloads to fetch when restoring paused state on startup. */
+const PAUSED_LOAD_LIMIT = 200
+
 /** Set of download IDs currently active (downloading or queued) in this session. */
 const activeDownloads = new Set()
+
+/** Holds the unlisten function for the icp://status event. Stored at module scope
+ *  so it can be called if init() is ever re-invoked, preventing duplicate listeners. */
+let icpStatusUnlisten = () => {}
 
 // ── Startup ──────────────────────────────────────────────────────────────────
 
@@ -57,18 +70,23 @@ async function init() {
   document.getElementById('icp-banner-close')?.addEventListener('click', () => {
     banner?.classList.add('hidden')
   })
-  listen('icp://status', ({ payload }) => {
-    if (!banner || !bannerMsg) return
-    if (payload.connected) {
-      banner.classList.add('hidden')
-    } else {
-      bannerMsg.textContent = payload.message ?? 'ICP network unreachable — licence and pattern updates paused.'
-      banner.classList.remove('hidden')
-    }
-  }).catch(() => { /* non-fatal if event system not ready */ })
+  // Store the unlisten handle at module scope — prevents duplicate listeners
+  // if init() is ever called more than once, and allows explicit cleanup.
+  try {
+    icpStatusUnlisten = await listen('icp://status', ({ payload }) => {
+      if (!banner || !bannerMsg) return
+      if (payload.connected) {
+        banner.classList.add('hidden')
+      } else {
+        bannerMsg.textContent = payload.message ?? 'ICP network unreachable — licence and pattern updates paused.'
+        banner.classList.remove('hidden')
+      }
+    })
+  } catch { /* non-fatal if event system not ready */ }
 
   initTorrentDrop()
   initCommunity()
+  initDeveloper()
   await Promise.all([loadHistory(), loadPausedDownloads(), loadTorrents(), loadQuarantine(), initSettings(), loadCommunity()])
 }
 
@@ -249,7 +267,7 @@ async function resumeDownload(id) {
 async function loadPausedDownloads() {
   let records
   try {
-    records = await invoke('get_downloads', { limit: 200 })
+    records = await invoke('get_downloads', { limit: PAUSED_LOAD_LIMIT })
   } catch {
     return
   }
@@ -266,6 +284,43 @@ async function loadPausedDownloads() {
 
 // ── UI event bindings ─────────────────────────────────────────────────────────
 
+// ── Theme ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Applies the given theme to the document root.
+ * "auto" removes the data-theme attribute so CSS @media prefers-color-scheme takes over.
+ * "light" or "dark" set the attribute to force the chosen scheme.
+ *
+ * Args:
+ *   theme: "auto" | "light" | "dark"
+ */
+export function applyTheme(theme) {
+  if (theme === 'auto') {
+    document.documentElement.removeAttribute('data-theme')
+  } else {
+    document.documentElement.setAttribute('data-theme', theme)
+  }
+}
+
+invoke('get_setting', { key: 'theme' }).then(t => applyTheme(t ?? 'auto')).catch(() => {})
+
+// ── Error reporting ───────────────────────────────────────────────────────────
+
+/**
+ * Shows an error toast and appends the failure to the on-disk error log.
+ * Use instead of showErrorToast for user-triggered action failures.
+ *
+ * Args:
+ *   action: Short label of the action that failed (e.g. "resume_download").
+ *   err:    The caught error value.
+ */
+export async function reportError(action, err) {
+  showErrorToast(`${action} failed: ${err}`)
+  invoke('log_error', { action, message: String(err) }).catch(() => {})
+}
+
+// ── UI event bindings ─────────────────────────────────────────────────────────
+
 startBtn.addEventListener('click', () => {
   const url = urlInput.value.trim()
   if (url) startDownload(url)
@@ -276,6 +331,20 @@ urlInput.addEventListener('keydown', (e) => {
     const url = urlInput.value.trim()
     if (url) startDownload(url)
   }
+})
+
+document.getElementById('folder-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('folder-btn')
+  const original = btn.textContent
+  btn.disabled = true
+  btn.textContent = 'Choosing\u2026'
+  const path = await invoke('pick_folder').catch(() => null)
+  btn.disabled = false
+  btn.textContent = original
+  if (!path) return
+  await invoke('set_setting', { key: 'default_folder', value: path }).catch(() => {})
+  btn.textContent = '\u2713 Saved'
+  setTimeout(() => { btn.textContent = original }, 2000)
 })
 
 proPrompt.querySelector('.pro-prompt-dismiss')?.addEventListener('click', () => {
@@ -309,8 +378,27 @@ document.querySelectorAll('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'))
     document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'))
+    document.getElementById('settings-btn')?.classList.remove('active')
     tab.classList.add('active')
     document.getElementById(`tab-${tab.dataset.tab}`).classList.add('active')
+  })
+})
+
+document.getElementById('settings-btn').addEventListener('click', () => {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'))
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'))
+  document.getElementById('settings-btn').classList.add('active')
+  document.getElementById('tab-settings').classList.add('active')
+})
+
+// ── Panel tab switching ───────────────────────────────────────────────────────
+
+document.querySelectorAll('.panel-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.panel-tab').forEach(t => t.classList.remove('active'))
+    document.querySelectorAll('.panel-pane').forEach(p => p.classList.remove('active'))
+    tab.classList.add('active')
+    document.getElementById(`panel-${tab.dataset.panelTab}`)?.classList.add('active')
   })
 })
 
@@ -320,19 +408,46 @@ const expandBtn = document.getElementById('expand-btn')
 const panelSlider = document.getElementById('panel-slider')
 const detailPanel = document.getElementById('detail-panel')
 let expanded = false
+let originalWindowWidth = 0
 
 /**
  * Toggles the detail panel open or closed.
  * Restores the saved panel width from settings when expanding.
+ * Resizes the app window to double its width (+80px for the divider) when expanding,
+ * and restores the original width when collapsing.
  */
 expandBtn.addEventListener('click', async () => {
   expanded = !expanded
   expandBtn.textContent = expanded ? '\u2212' : '+'
-  panelSlider.classList.toggle('hidden', !expanded)
-  detailPanel.classList.toggle('hidden', !expanded)
   if (expanded) {
     const saved = await invoke('get_setting', { key: 'panel_width' })
     detailPanel.style.width = saved ? `${saved}px` : '240px'
+    panelSlider.classList.remove('hidden')
+    try {
+      const win = getCurrent()
+      const outer = await win.outerSize()
+      const scale = await win.scaleFactor()
+      originalWindowWidth = outer.width
+      const panelWidth = parseInt(detailPanel.style.width, 10)
+      // panelWidth is in CSS logical pixels; multiply by scaleFactor to convert
+      // to physical pixels so the window grows correctly on Retina/HiDPI displays.
+      await win.setSize(new PhysicalSize(
+        outer.width + Math.round((panelWidth + 4) * scale),
+        outer.height
+      ))
+    } catch { /* non-fatal — window resize fails gracefully */ }
+    detailPanel.classList.remove('hidden')
+  } else {
+    detailPanel.classList.add('hidden')
+    panelSlider.classList.add('hidden')
+    if (originalWindowWidth > 0) {
+      try {
+        const win = getCurrent()
+        const size = await win.outerSize()
+        await win.setSize(new PhysicalSize(originalWindowWidth, size.height))
+      } catch { /* non-fatal */ }
+      originalWindowWidth = 0
+    }
   }
 })
 
@@ -365,7 +480,7 @@ panelSlider.addEventListener('mousedown', (e) => {
 document.addEventListener('mousemove', (e) => {
   if (!dragging) return
   const delta = startX - e.clientX
-  detailPanel.style.width = `${Math.max(180, Math.min(500, startWidth + delta))}px`
+  detailPanel.style.width = `${Math.max(PANEL_MIN_WIDTH, Math.min(PANEL_MAX_WIDTH, startWidth + delta))}px`
 })
 
 /**

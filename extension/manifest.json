@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "ReLay",
+  "version": "1.0.0",
+  "description": "Route downloads to the ReLay desktop download manager.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2p3fGHb7cmdLDR4uP3qBY7oVAQL4ZyF15q5tGXhQp1WKUTachSi38mLRBKs/S++ZRhp7TRPS2aCqfw0CmvxXjIrvmLMAu6iQDgW2fVOdThzzlRGqrDqlLQXnILlJ82BcTIg2b04MviCrM1kVLzUAgoK9DK97BN74R1y1WvE3XIovNx8x8cQEg2bVP+i6T4L3A1UYkFntdp4oVA9lvgKO7nzGH+t/u7rIwixeUzsVw5FuPlCnZLkomoJoXh1TeNRTtyBgMA4QPgdnG4erJq9s465+dNgdi/bv9arhtXGN5oYiwHT/uSee38ANSTUBTkXWh+Ht5DZaM7TDNLDNu8evKwIDAQAB",
+
+  "permissions": [
+    "downloads",
+    "nativeMessaging",
+    "storage",
+    "alarms",
+    "declarativeNetRequest"
+  ],
+  "host_permissions": ["<all_urls>"],
+
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+
+  "content_scripts": [{
+    "matches": ["<all_urls>"],
+    "js": ["content.js"],
+    "run_at": "document_start"
+  }],
+
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+
+  "declarative_net_request": {
+    "rule_resources": [{
+      "id": "redirect_rules",
+      "enabled": true,
+      "path": "rules.json"
+    }]
+  }
+}

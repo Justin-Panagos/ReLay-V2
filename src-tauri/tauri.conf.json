@@ -17,6 +17,10 @@
       },
       "dialog": {
         "message": true
+      },
+      "window": {
+        "setSize": true,
+        "all": true
       }
     },
     "bundle": {

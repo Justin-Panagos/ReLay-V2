@@ -1,4 +1,5 @@
 pub mod db;
+pub mod developer;
 pub mod download;
 pub mod icp;
 pub mod pro;

@@ -702,9 +702,15 @@ pub fn update_sandbox_report(conn: &Connection, id: i64, report_json: &str) -> R
     Ok(())
 }
 
+/// Maximum number of ICP pattern rows kept locally. Oldest rows (by timestamp) are
+/// pruned after each sync to prevent unbounded SQLite growth if the canister ever
+/// ships a very large pattern set.
+const MAX_ICP_PATTERN_ROWS: i64 = 100_000;
+
 /// Upserts a batch of ICP pattern entries into the local cache.
 /// Uses INSERT OR REPLACE so the same hash can be re-synced with updated metadata.
-/// Wraps the batch in a single transaction for performance.
+/// Wraps the batch in a single transaction for performance. After inserting, trims
+/// the table to `MAX_ICP_PATTERN_ROWS` by deleting the oldest rows by timestamp.
 ///
 /// Args:
 ///   conn:    Open database connection.
@@ -727,6 +733,13 @@ pub fn upsert_icp_patterns(
             ],
         )?;
     }
+    // Prune oldest rows to keep the table within the size limit.
+    conn.execute(
+        "DELETE FROM icp_patterns WHERE id NOT IN (
+             SELECT id FROM icp_patterns ORDER BY timestamp DESC LIMIT ?1
+         )",
+        rusqlite::params![MAX_ICP_PATTERN_ROWS],
+    )?;
     conn.execute_batch("COMMIT")?;
     Ok(())
 }
@@ -748,6 +761,44 @@ pub fn lookup_icp_pattern(conn: &Connection, sha256: &str) -> Result<Option<Stri
     } else {
         Ok(None)
     }
+}
+
+/// Returns true if a non-terminal HTTP download for this URL already exists.
+/// Blocks adding a duplicate when the same URL is already queued, downloading, or paused.
+///
+/// Args:
+///   conn: Open database connection.
+///   url:  The HTTP URL to check.
+///
+/// Returns:
+///   true if an active/queued/paused download with this URL exists.
+pub fn download_exists_for_url(conn: &Connection, url: &str) -> bool {
+    conn.query_row(
+        "SELECT 1 FROM downloads WHERE url = ?1 AND type = 'http'
+         AND status IN ('queued','downloading','paused') LIMIT 1",
+        rusqlite::params![url],
+        |_| Ok(()),
+    )
+    .is_ok()
+}
+
+/// Returns true if a non-terminal torrent for this URL (magnet URI) already exists.
+/// Blocks adding a duplicate magnet that is already queued, downloading, or paused.
+///
+/// Args:
+///   conn: Open database connection.
+///   url:  The magnet URI or torrent identifier to check.
+///
+/// Returns:
+///   true if an active/queued/paused torrent with this URL exists.
+pub fn torrent_exists_for_url(conn: &Connection, url: &str) -> bool {
+    conn.query_row(
+        "SELECT 1 FROM downloads WHERE url = ?1 AND type = 'torrent'
+         AND status IN ('queued','downloading','paused') LIMIT 1",
+        rusqlite::params![url],
+        |_| Ok(()),
+    )
+    .is_ok()
 }
 
 /// Returns the current time as a Unix timestamp string.

@@ -162,7 +162,35 @@ pub async fn run_pipeline(
         }};
     }
 
-    run_layer!(1, "Hash", layer1_hash::scan(&mut ctx, vt_key.as_deref(), app));
+    // Layer 1: Hash — expanded manually so we can hook VT → ICP auto-submit.
+    // The macro returns early on Threat, making post-return hooks impossible.
+    app.emit_all(
+        &format!("download://scan/{db_id}"),
+        ScanPayload { layer: 1, name: "Hash".to_string() },
+    )
+    .ok();
+    let l1 = layer1_hash::scan(&mut ctx, vt_key.as_deref(), app).await;
+    if let LayerVerdict::Threat { ref reason } = l1.verdict {
+        // VT key set → VT (not ICP cache) caught this threat. Layer 1 checks the local
+        // ICP cache first and returns early if found, so a Threat verdict here with VT
+        // key present means the hash is missing from the canister. Submit it as a
+        // community proposal in the background so other clients benefit.
+        if vt_key.is_some() && !ctx.sha256.is_empty() {
+            let sha256 = ctx.sha256.clone();
+            let app_clone = app.clone();
+            tokio::spawn(auto_submit_vt_threat(sha256, app_clone));
+        }
+        let reason = reason.clone();
+        layers.push(l1);
+        return PipelineResult {
+            sha256: ctx.sha256.clone(),
+            layers,
+            verdict: FinalVerdict::Quarantined { reason },
+            sandbox_report: None,
+        };
+    }
+    layers.push(l1);
+
     run_layer!(2, "YARA", layer2_yara::scan(&ctx));
     run_layer!(3, "Entropy", layer3_entropy::scan(&ctx));
     run_layer!(4, "File Type", layer4_filetype::scan(&ctx));
@@ -204,5 +232,63 @@ pub async fn run_pipeline(
         layers,
         verdict: FinalVerdict::Clean,
         sandbox_report,
+    }
+}
+
+// ── VT → ICP auto-submit ──────────────────────────────────────────────────────
+
+/// Submits a VirusTotal-detected hash to the ICP governance canister as a
+/// community proposal so other clients benefit from the detection.
+/// Fire-and-forget — all errors are logged and swallowed; never panics.
+///
+/// Args:
+///   sha256: Hex-encoded SHA-256 of the file VirusTotal flagged.
+///   app:    Tauri app handle used to access ConfigState and DbState.
+async fn auto_submit_vt_threat(sha256: String, app: tauri::AppHandle) {
+    use crate::db::{self, DbState};
+    use crate::icp::{agent as icp_agent, ConfigState};
+
+    let config = match app.try_state::<ConfigState>() {
+        Some(c) => c,
+        None => return,
+    };
+
+    let device_id = {
+        let db_state = match app.try_state::<DbState>() {
+            Some(d) => d,
+            None => return,
+        };
+        db_state
+            .0
+            .lock()
+            .ok()
+            .and_then(|conn| db::get_setting(&conn, "device_id").ok().flatten())
+            .unwrap_or_else(|| "anonymous".to_string())
+    };
+
+    let icp = &config.0;
+    let a = match icp_agent::build_agent(&icp.icp_url).await {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("[shield] auto_submit_vt_threat: failed to build IC agent: {e:?}");
+            return;
+        }
+    };
+    let governance_id = match icp_agent::parse_principal(&icp.canisters.governance) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("[shield] auto_submit_vt_threat: invalid governance principal: {e:?}");
+            return;
+        }
+    };
+
+    match icp_agent::submit_proposal(&a, &governance_id, sha256.clone(), device_id).await {
+        Ok(proposal_id) => eprintln!(
+            "[shield] auto_submit_vt_threat: submitted {} as proposal #{}",
+            sha256, proposal_id
+        ),
+        Err(e) => eprintln!(
+            "[shield] auto_submit_vt_threat: ICP submission failed (non-fatal): {e:?}"
+        ),
     }
 }

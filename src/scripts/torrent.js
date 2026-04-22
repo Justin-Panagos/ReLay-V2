@@ -9,6 +9,9 @@ import { appWindow } from '@tauri-apps/api/window'
 import { formatBytes, escHtml } from './utils.js'
 import { showErrorToast } from './toast.js'
 
+/** Maximum number of torrent records to fetch from the database on load. */
+const TORRENT_LOAD_LIMIT = 50
+
 /** @type {Map<number, { name: string, destination: string, fileBytes?: number[] }>} */
 const torrentCardData = new Map()
 
@@ -54,11 +57,18 @@ export function addTorrentCard(id, name, destination = '') {
       <button class="btn-icon card-pause" title="Pause">&#9646;&#9646;</button>
       <button class="btn-icon card-resume" title="Resume" style="display:none">&#9654;</button>
       <button class="btn-icon card-cancel" title="Cancel">&#10005;</button>
+      <div class="card-seed-menu hidden">
+        <button class="btn-icon card-seed-toggle" title="Options">&#8942;</button>
+        <div class="card-seed-dropdown hidden">
+          <button class="card-seed-stop">Stop seeding</button>
+        </div>
+      </div>
     </div>
   `
 
   card.querySelector('.card-pause').addEventListener('click', async (e) => {
     e.stopPropagation()
+    console.log(`[torrent] invoking pause_torrent id=${id}`)
     try {
       await invoke('pause_torrent', { id })
     } catch (err) {
@@ -69,6 +79,7 @@ export function addTorrentCard(id, name, destination = '') {
 
   card.querySelector('.card-resume').addEventListener('click', async (e) => {
     e.stopPropagation()
+    console.log(`[torrent] invoking resume_torrent id=${id}`)
     try {
       await invoke('resume_torrent', { id })
       setTorrentCardResuming(id)
@@ -80,11 +91,29 @@ export function addTorrentCard(id, name, destination = '') {
 
   card.querySelector('.card-cancel').addEventListener('click', async (e) => {
     e.stopPropagation()
+    console.log(`[torrent] invoking cancel_torrent id=${id}`)
     try {
       await invoke('cancel_torrent', { id })
     } catch (err) {
       console.error(`cancel_torrent(${id}) failed:`, err)
       showErrorToast(`Cancel failed: ${err}`)
+    }
+  })
+
+  card.querySelector('.card-seed-toggle').addEventListener('click', (e) => {
+    e.stopPropagation()
+    card.querySelector('.card-seed-dropdown').classList.toggle('hidden')
+  })
+
+  card.querySelector('.card-seed-stop').addEventListener('click', async (e) => {
+    e.stopPropagation()
+    card.querySelector('.card-seed-dropdown').classList.add('hidden')
+    console.log(`[torrent] invoking cancel_torrent (stop seeding) id=${id}`)
+    try {
+      await invoke('cancel_torrent', { id })
+    } catch (err) {
+      console.error(`cancel_torrent(stop-seed)(${id}) failed:`, err)
+      showErrorToast(`Stop seeding failed: ${err}`)
     }
   })
 
@@ -175,6 +204,8 @@ export function setTorrentCardComplete(id, path) {
   card.querySelector('.card-speed').textContent = ''
   card.querySelector('.card-pause').style.display = 'none'
   card.querySelector('.card-resume').style.display = 'none'
+  card.querySelector('.card-cancel').style.display = 'none'
+  card.querySelector('.card-seed-menu').classList.remove('hidden')
 
   const data = torrentCardData.get(id)
   if (data) data.destination = path
@@ -300,7 +331,7 @@ export async function subscribeToTorrentEvents(id) {
 export async function loadTorrents() {
   let rows
   try {
-    rows = await invoke('get_torrents', { limit: 50 })
+    rows = await invoke('get_torrents', { limit: TORRENT_LOAD_LIMIT })
   } catch {
     return
   }

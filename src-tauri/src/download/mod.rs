@@ -104,9 +104,8 @@ pub async fn download_file_resume(
 
     // Mark as downloading again.
     if let Some(db) = app.try_state::<DbState>() {
-        if let Ok(conn) = db.0.lock() {
-            db::update_download_status(&conn, id, "downloading").ok();
-        }
+        let conn = db.0.lock().unwrap_or_else(|p| p.into_inner());
+        db::update_download_status(&conn, id, "downloading").ok();
     }
 
     let url = record.url.clone();
@@ -162,9 +161,8 @@ async fn handle_outcome(
             )
             .ok();
             if let Some(db) = app.try_state::<DbState>() {
-                if let Ok(conn) = db.0.lock() {
-                    db::update_download_status(&conn, id, "scanning").ok();
-                }
+                let conn = db.0.lock().unwrap_or_else(|p| p.into_inner());
+                db::update_download_status(&conn, id, "scanning").ok();
             }
 
             // Run the six-layer pipeline.
@@ -172,35 +170,46 @@ async fn handle_outcome(
 
             // Persist SHA-256 regardless of verdict.
             if let Some(db) = app.try_state::<DbState>() {
-                if let Ok(conn) = db.0.lock() {
-                    db::update_download_sha256(&conn, id, &result.sha256).ok();
-                }
+                let conn = db.0.lock().unwrap_or_else(|p| p.into_inner());
+                db::update_download_sha256(&conn, id, &result.sha256).ok();
             }
 
             // Persist sandbox report if Layer 7 ran.
             if let Some(ref report_json) = result.sandbox_report {
                 if let Some(db) = app.try_state::<DbState>() {
-                    if let Ok(conn) = db.0.lock() {
-                        db::update_sandbox_report(&conn, id, report_json).ok();
-                    }
+                    let conn = db.0.lock().unwrap_or_else(|p| p.into_inner());
+                    db::update_sandbox_report(&conn, id, report_json).ok();
                 }
             }
 
             match result.verdict {
                 shield::FinalVerdict::Clean => {
-                    if let Some(db) = app.try_state::<DbState>() {
-                        if let Ok(conn) = db.0.lock() {
-                            db::update_download_status(&conn, id, "complete").ok();
-                            db::delete_chunk_snapshots(&conn, id).ok();
-                        }
+                    let status_ok = if let Some(db) = app.try_state::<DbState>() {
+                        let conn = db.0.lock().unwrap_or_else(|p| p.into_inner());
+                        let ok = db::update_download_status(&conn, id, "complete").is_ok();
+                        db::delete_chunk_snapshots(&conn, id).ok();
+                        ok
+                    } else {
+                        false
+                    };
+                    if status_ok {
+                        app.emit_all(
+                            &format!("download://complete/{id}"),
+                            CompletePayload {
+                                path: file_path.to_string_lossy().to_string(),
+                            },
+                        )
+                        .ok();
+                    } else {
+                        eprintln!("[download] DB status write failed for complete id={id}");
+                        app.emit_all(
+                            &format!("download://error/{id}"),
+                            ErrorPayload {
+                                message: "Download complete but failed to save status — please restart the app.".to_string(),
+                            },
+                        )
+                        .ok();
                     }
-                    app.emit_all(
-                        &format!("download://complete/{id}"),
-                        CompletePayload {
-                            path: file_path.to_string_lossy().to_string(),
-                        },
-                    )
-                    .ok();
                 }
                 shield::FinalVerdict::Quarantined { reason } => {
                     let quar_path = quarantine_path(file_path);
@@ -232,6 +241,11 @@ async fn handle_outcome(
                         }
                         if let Err(e) = std::fs::rename(file_path, &quar_path) {
                             eprintln!("[shield] file move failed after DB write: {e} — file remains at original path");
+                            // Clean up the quarantine dir if it was just created and is now empty,
+                            // so failed moves don't leave orphan directories behind.
+                            if let Some(parent) = quar_path.parent() {
+                                std::fs::remove_dir(parent).ok(); // only removes if empty
+                            }
                         }
                     }
                     app.emit_all(
@@ -248,22 +262,33 @@ async fn handle_outcome(
         Ok(chunked::LifecycleOutcome::Paused(snapshots)) => {
             let intent_val = intent.load(Ordering::Relaxed);
             if intent_val == lifecycle::intent::PAUSE {
-                if let Some(db) = app.try_state::<DbState>() {
-                    if let Ok(conn) = db.0.lock() {
-                        db::save_chunk_snapshots(&conn, id, &snapshots).ok();
-                        db::update_download_status(&conn, id, "paused").ok();
-                    }
-                }
-                app.emit_all(&format!("download://paused/{id}"), PausedPayload {})
+                let paused_ok = if let Some(db) = app.try_state::<DbState>() {
+                    let conn = db.0.lock().unwrap_or_else(|p| p.into_inner());
+                    db::save_chunk_snapshots(&conn, id, &snapshots).ok();
+                    db::update_download_status(&conn, id, "paused").is_ok()
+                } else {
+                    false
+                };
+                if paused_ok {
+                    app.emit_all(&format!("download://paused/{id}"), PausedPayload {})
+                        .ok();
+                } else {
+                    eprintln!("[download] DB status write failed for paused id={id}");
+                    app.emit_all(
+                        &format!("download://error/{id}"),
+                        ErrorPayload {
+                            message: "Pause failed to save state — download will restart from the beginning on resume.".to_string(),
+                        },
+                    )
                     .ok();
+                }
             } else {
                 // Cancel (or any other non-pause intent): delete file and mark failed.
                 std::fs::remove_file(file_path).ok();
                 if let Some(db) = app.try_state::<DbState>() {
-                    if let Ok(conn) = db.0.lock() {
-                        db::delete_chunk_snapshots(&conn, id).ok();
-                        db::update_download_status(&conn, id, "failed").ok();
-                    }
+                    let conn = db.0.lock().unwrap_or_else(|p| p.into_inner());
+                    db::delete_chunk_snapshots(&conn, id).ok();
+                    db::update_download_status(&conn, id, "failed").ok();
                 }
                 app.emit_all(
                     &format!("download://error/{id}"),
@@ -276,10 +301,9 @@ async fn handle_outcome(
         }
         Err(e) => {
             if let Some(db) = app.try_state::<DbState>() {
-                if let Ok(conn) = db.0.lock() {
-                    db::delete_chunk_snapshots(&conn, id).ok();
-                    db::update_download_status(&conn, id, "failed").ok();
-                }
+                let conn = db.0.lock().unwrap_or_else(|p| p.into_inner());
+                db::delete_chunk_snapshots(&conn, id).ok();
+                db::update_download_status(&conn, id, "failed").ok();
             }
             app.emit_all(
                 &format!("download://error/{id}"),
@@ -321,9 +345,8 @@ async fn run_download(
 
     // Mark as downloading in DB.
     if let Some(state) = app.try_state::<DbState>() {
-        if let Ok(conn) = state.0.lock() {
-            db::update_download_status(&conn, id, "downloading").ok();
-        }
+        let conn = state.0.lock().unwrap_or_else(|p| p.into_inner());
+        db::update_download_status(&conn, id, "downloading").ok();
     }
 
     // Single GET probe — avoids a separate HEAD round-trip that some servers handle slowly.
@@ -348,9 +371,8 @@ async fn run_download(
     // Store known file size in DB immediately so the history tab can show it.
     if let Some(size) = content_length {
         if let Some(state) = app.try_state::<DbState>() {
-            if let Ok(conn) = state.0.lock() {
-                db::update_download_size(&conn, id, size).ok();
-            }
+            let conn = state.0.lock().unwrap_or_else(|p| p.into_inner());
+            db::update_download_size(&conn, id, size).ok();
         }
     }
 

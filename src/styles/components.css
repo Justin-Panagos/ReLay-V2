@@ -30,6 +30,40 @@
   overflow: hidden;
 }
 
+#panel-tab-bar {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.panel-tab {
+  flex: 1;
+  padding: 8px 4px;
+  font-size: 10px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.panel-tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.panel-pane {
+  display: none;
+  flex: 1;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.panel-pane.active {
+  display: flex;
+}
+
 .hidden {
   display: none !important;
 }
@@ -70,6 +104,11 @@
 
 .btn-icon:hover {
   background: var(--bg-tertiary);
+}
+
+.btn-icon.active {
+  color: var(--accent);
+  background: var(--bg-secondary);
 }
 
 /* URL input area */
@@ -128,7 +167,7 @@
   border: none;
   border-radius: var(--radius);
   background: var(--accent);
-  color: #fff;
+  color: var(--text-on-accent);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
@@ -259,7 +298,7 @@
   border: none;
   border-radius: var(--radius);
   background: var(--accent);
-  color: #fff;
+  color: var(--text-on-accent);
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
@@ -439,7 +478,7 @@
   border: none;
   border-radius: var(--radius);
   background: var(--accent);
-  color: #fff;
+  color: var(--text-on-accent);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
@@ -518,7 +557,7 @@
                             padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
 .settings-label          { display: flex; align-items: center; gap: 6px; color: var(--text); }
 .settings-badge-pro      { font-size: 9px; font-weight: 700; padding: 1px 5px;
-                            border-radius: 3px; background: var(--accent); color: #fff; }
+                            border-radius: 3px; background: var(--accent); color: var(--text-on-accent); }
 .settings-input          { padding: 4px 7px; border: 1px solid var(--border);
                             border-radius: var(--radius); background: var(--bg-secondary);
                             color: var(--text); font-size: 11px; font-family: inherit;
@@ -582,15 +621,15 @@
   background: var(--bg-secondary);
   color: var(--text);
 }
-.vote-approve-btn:hover { background: var(--accent-green); color: #fff; border-color: var(--accent-green); }
-.vote-reject-btn:hover  { background: var(--accent-red);   color: #fff; border-color: var(--accent-red); }
+.vote-approve-btn:hover { background: var(--accent-green); color: var(--text-on-accent); border-color: var(--accent-green); }
+.vote-reject-btn:hover  { background: var(--accent-red);   color: var(--text-on-accent); border-color: var(--accent-red); }
 .vote-approve-btn:disabled,
 .vote-reject-btn:disabled { opacity: 0.4; cursor: default; }
 
 /* ── ICP offline banner ──────────────────────────────────────────────────────*/
 .icp-banner {
   background: var(--accent-amber);
-  color: #000;
+  color: var(--text-on-amber);
   font-size: 11px;
   padding: 4px 10px;
   display: flex;
@@ -599,10 +638,49 @@
   gap: 8px;
 }
 .icp-banner .btn-icon {
-  color: #000;
+  color: var(--text-on-amber);
   opacity: 0.6;
   font-size: 10px;
   flex-shrink: 0;
+}
+
+/* ── Duration text on completed history cards ────────────────────────────────*/
+.duration {
+  color: var(--text-muted);
+}
+
+/* ── Torrent seeding ⋮ overflow menu ─────────────────────────────────────────*/
+.card-seed-menu {
+  position: relative;
+}
+
+.card-seed-dropdown {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  min-width: 120px;
+  z-index: 10;
+}
+
+.card-seed-stop {
+  display: block;
+  width: 100%;
+  padding: 7px 12px;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--accent-red);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.card-seed-stop:hover {
+  background: var(--bg-secondary);
 }
 
 /* ── Toast notifications ─────────────────────────────────────────────────────*/
@@ -611,14 +689,14 @@
   bottom: 20px;
   right: 16px;
   z-index: 9999;
-  background: var(--bg-card);
-  color: var(--color-text);
+  background: var(--bg);
+  color: var(--text);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 10px 14px;
   max-width: 280px;
   font-size: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-toast);
   cursor: pointer;
   animation: toast-in .2s ease-out;
   margin-bottom: 8px;
@@ -627,4 +705,74 @@
 @keyframes toast-in {
   from { transform: translateX(120%); opacity: 0; }
   to   { transform: translateX(0);    opacity: 1; }
+}
+
+/* ── Developer tab ────────────────────────────────────────────────────────── */
+
+.dev-section-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 4px 0 8px;
+}
+
+.dev-warn {
+  color: var(--accent-amber);
+}
+
+.dev-polling-body {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 12px 0 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+@keyframes dev-dots {
+  0%  { content: '.';   }
+  33% { content: '..';  }
+  66% { content: '...'; }
+}
+
+.dev-dots::after {
+  content: '.';
+  animation: dev-dots 1.2s steps(1) infinite;
+}
+
+.dev-key-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dev-key-masked {
+  font-family: monospace;
+  font-size: 13px;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.dev-endpoint-input {
+  width: 200px;
+  font-family: monospace;
+  font-size: 10px;
+}
+
+.dev-format-group {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.dev-format-opt {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.dev-countdown {
+  color: var(--accent-amber);
+  font-variant-numeric: tabular-nums;
 }
