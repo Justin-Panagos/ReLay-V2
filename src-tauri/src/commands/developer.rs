@@ -9,7 +9,7 @@ pub struct ApiCredentials {
     pub email: String,
     /// The API key or snapshot token; empty string when none stored.
     pub key: String,
-    /// "none" | "snapshot" | "monthly" | "annual" | "enterprise"
+    /// "none" | "snapshot" | "monthly"
     pub plan: String,
     /// Unix seconds expiry; 0 when not set.
     pub expiry: u64,
@@ -24,7 +24,7 @@ pub struct DevStatus {
     pub found: bool,
     /// The API key or snapshot token.
     pub key: String,
-    /// "snapshot" | "monthly" | "annual" | "enterprise"
+    /// "snapshot" | "monthly"
     pub plan: String,
     /// Unix seconds expiry.
     pub expiry: u64,
@@ -106,7 +106,7 @@ pub async fn api_snapshot_checkout(
 /// the Paystack authorization URL in the system browser.
 ///
 /// Args:
-///   plan:   "monthly" | "annual" | "enterprise"
+///   plan:   "monthly"
 ///   email:  The user's email address for the Paystack payment page.
 ///   config: Tauri-managed ICP config state (reads worker_url).
 ///   client: Shared reqwest HTTP client.

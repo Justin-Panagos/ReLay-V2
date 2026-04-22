@@ -1,27 +1,8 @@
 use super::{LayerResult, LayerVerdict, ScanContext};
 
-/// Bundled YARA rules. Add new rules here; never remove existing ones.
-const RULES: &str = r#"
-rule EICAR_Test {
-    meta:
-        description = "EICAR antivirus test file"
-    strings:
-        $s = "EICAR-STANDARD-ANTIVIRUS-TEST-FILE"
-    condition:
-        $s
-}
-
-rule Suspicious_Dropper {
-    meta:
-        description = "Generic dropper pattern"
-    strings:
-        $a = "This program cannot be run in DOS mode"
-        $b = { 4D 5A }           // MZ header
-        $c = "cmd.exe /c" nocase
-    condition:
-        $b at 0 and $a and $c
-}
-"#;
+/// Bundled YARA rules loaded from the external file at compile time.
+/// The yara-sync GitHub Action updates bundled_rules.yar daily with community rules.
+const RULES: &str = include_str!("bundled_rules.yar");
 
 /// Layer 2: YARA rule scan.
 /// Compiles the bundled YARA rules and scans the file with a 30-second timeout.

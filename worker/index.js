@@ -421,12 +421,12 @@ async function handleSnapshotCheckout(request, env) {
 
 /**
  * Handles POST /api-checkout — initialises a Paystack subscription checkout for
- * monthly ($15), annual ($120), or enterprise ($500) API feed access.
- * The plan code is read from Worker secrets (PAYSTACK_MONTHLY_PLAN etc.).
+ * monthly Developer API feed access.
+ * The plan code is read from the PAYSTACK_DEVELOPER_PLAN Worker secret.
  *
  * Args:
- *   request: Incoming POST request with JSON body { plan: "monthly"|"annual"|"enterprise", email: string }.
- *   env:     Worker environment bindings (PAYSTACK_SECRET_KEY, plan code secrets).
+ *   request: Incoming POST request with JSON body { plan: "monthly", email: string }.
+ *   env:     Worker environment bindings (PAYSTACK_SECRET_KEY, PAYSTACK_DEVELOPER_PLAN).
  *
  * Returns:
  *   JSON response { authorization_url: string } on success, error Response otherwise.
@@ -441,12 +441,8 @@ async function handleApiCheckout(request, env) {
   const { plan, email } = body
   if (!email) return new Response('missing email', { status: 400 })
 
-  const planAmounts = { monthly: 800000 }
-  const planSecrets = {
-    monthly: env.PAYSTACK_DEVELOPER_PLAN,
-  }
-  const amount = planAmounts[plan]
-  const planCode = planSecrets[plan]
+  const amount   = plan === 'monthly' ? 800000 : null
+  const planCode = plan === 'monthly' ? env.PAYSTACK_DEVELOPER_PLAN : null
   if (!amount || !planCode) return new Response('invalid plan — use monthly', { status: 400 })
 
   const workerOrigin = new URL(request.url).origin
@@ -647,13 +643,10 @@ async function handleWebhook(request, env) {
 }
 
 /**
- * Returns a Unix-seconds expiry timestamp for the given API plan.
- *
- * Args:
- *   plan: "monthly" | "annual" | "enterprise"
+ * Returns a Unix-seconds expiry timestamp for the Developer API monthly plan.
  *
  * Returns:
- *   Unix seconds for the end of the billing period.
+ *   Unix seconds 31 days from now.
  */
 function expiryForPlan(_plan) {
   const now = Math.floor(Date.now() / 1000)

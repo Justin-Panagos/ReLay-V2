@@ -284,8 +284,7 @@ async fn auto_submit_vt_threat(sha256: String, app: tauri::AppHandle) {
 
     match icp_agent::submit_proposal(&a, &governance_id, sha256.clone(), device_id).await {
         Ok(proposal_id) => eprintln!(
-            "[shield] auto_submit_vt_threat: submitted {} as proposal #{}",
-            sha256, proposal_id
+            "[shield] auto_submit_vt_threat: submitted {sha256} as proposal #{proposal_id}"
         ),
         Err(e) => eprintln!(
             "[shield] auto_submit_vt_threat: ICP submission failed (non-fatal): {e:?}"

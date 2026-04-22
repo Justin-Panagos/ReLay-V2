@@ -322,13 +322,13 @@ function startCountdown(expiryUnix) {
  * Returns a human-readable label for a plan identifier.
  *
  * Args:
- *   plan: "snapshot" | "monthly" | "annual" | "enterprise"
+ *   plan: "snapshot" | "monthly"
  *
  * Returns:
  *   Display string.
  */
 function planLabel(plan) {
-  return { snapshot: 'Snapshot', monthly: 'Monthly', annual: 'Annual', enterprise: 'Enterprise' }[plan] ?? plan
+  return { snapshot: 'Snapshot', monthly: 'Monthly' }[plan] ?? plan
 }
 
 /**

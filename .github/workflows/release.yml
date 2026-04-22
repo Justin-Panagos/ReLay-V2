@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install YARA (macOS)
+        if: matrix.os == 'macos-latest'
+        run: brew install yara
+
+      - name: Install YARA (Linux)
+        if: matrix.os == 'ubuntu-22.04'
+        run: sudo apt-get install -y libyara-dev
+
+      - name: Install YARA (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          vcpkg install yara:x64-windows-static
+          echo "VCPKG_ROOT=C:/vcpkg" >> $env:GITHUB_ENV
+          echo "YARA_LIBRARY_PATH=C:/vcpkg/installed/x64-windows-static/lib" >> $env:GITHUB_ENV
+
+      - name: Install Linux system deps
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev \
+            librsvg2-dev patchelf libssl-dev
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: Build and release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: ReLay ${{ github.ref_name }}
+          releaseBody: See CHANGELOG.md for details.
+          releaseDraft: true
+          prerelease: false

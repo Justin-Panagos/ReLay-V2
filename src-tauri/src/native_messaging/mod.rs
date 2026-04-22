@@ -312,7 +312,7 @@ fn build_manifest_json(exe: &std::path::Path) -> String {
   "path": "{exe_str}",
   "type": "stdio",
   "allowed_origins": [
-    "chrome-extension://EXTENSION_ID_PLACEHOLDER/"
+    "chrome-extension://clicbaegmppeombaglajpeikmbfojobo/"
   ]
 }}"#
     )

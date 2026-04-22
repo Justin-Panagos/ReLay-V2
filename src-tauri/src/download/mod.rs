@@ -200,6 +200,12 @@ async fn handle_outcome(
                             },
                         )
                         .ok();
+                        let _ = tauri::api::notification::Notification::new(
+                            &app.config().tauri.bundle.identifier,
+                        )
+                        .title("Download complete")
+                        .body(filename)
+                        .show();
                     } else {
                         eprintln!("[download] DB status write failed for complete id={id}");
                         app.emit_all(
