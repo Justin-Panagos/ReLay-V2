@@ -146,6 +146,7 @@ fn main() {
             commands::icp::get_proposals,
             commands::icp::get_reputation,
             commands::icp::vote_proposal,
+            commands::icp::get_pattern_sync_info,
             commands::pro::get_pro_status,
             commands::pro::open_upgrade_page,
             commands::pro::cancel_subscription,

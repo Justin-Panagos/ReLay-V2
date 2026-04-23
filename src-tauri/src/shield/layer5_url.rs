@@ -39,12 +39,24 @@ pub async fn scan(ctx: &ScanContext, vt_key: Option<&str>) -> LayerResult {
 
     // Optional VT URL lookup.
     if let Some(key) = vt_key {
-        if let Ok(Some(reason)) = check_vt_url(&url, &key).await {
-            return LayerResult {
-                layer: 5,
-                name: "URL Reputation",
-                verdict: LayerVerdict::Suspicious { reason },
-            };
+        match check_vt_url(&url, &key).await {
+            Ok(Some(reason)) => {
+                return LayerResult {
+                    layer: 5,
+                    name: "URL Reputation",
+                    verdict: LayerVerdict::Suspicious { reason },
+                };
+            }
+            // VT unavailable or rate-limited — treat as Suspicious so the user
+            // is informed rather than silently passing a file VT could not evaluate.
+            Err(reason) => {
+                return LayerResult {
+                    layer: 5,
+                    name: "URL Reputation",
+                    verdict: LayerVerdict::Suspicious { reason },
+                };
+            }
+            Ok(None) => {}
         }
     }
 
@@ -66,9 +78,13 @@ fn check_blocklist(url: &str) -> Option<String> {
     let lower = url.to_lowercase();
 
     for tld in SUSPICIOUS_TLDS {
-        // Match TLD at end of host (before any path/query).
-        // Extract host from URL by splitting on '/'.
-        let host = lower.split('/').nth(2).unwrap_or("");
+        // Extract host from the URL, then strip port (:8080), query (?q=1), and
+        // fragment (#anchor) so TLD matching works on the bare hostname.
+        let host_raw = lower.split('/').nth(2).unwrap_or("");
+        let host = host_raw
+            .split([':', '?', '#'])
+            .next()
+            .unwrap_or(host_raw);
         if host.ends_with(tld) || host.contains(&format!("{tld}/")) {
             return Some(format!("URL uses suspicious TLD: {tld}"));
         }
@@ -91,8 +107,9 @@ fn check_blocklist(url: &str) -> Option<String> {
 ///   api_key: VirusTotal API key.
 ///
 /// Returns:
-///   Ok(Some(reason)) if malicious > 3 engines, Ok(None) if clean, Err on network error.
-async fn check_vt_url(url: &str, api_key: &str) -> Result<Option<String>, reqwest::Error> {
+///   Ok(Some(reason)) if malicious > 3 engines, Ok(None) if clean,
+///   Err(reason) if VT is unavailable or returns a non-200 status.
+async fn check_vt_url(url: &str, api_key: &str) -> Result<Option<String>, String> {
     // VT URL id = base64url(url), no padding.
     let mut encoded = Vec::new();
     base64_url_encode(url.as_bytes(), &mut encoded);
@@ -104,13 +121,20 @@ async fn check_vt_url(url: &str, api_key: &str) -> Result<Option<String>, reqwes
         .get(&vt_url)
         .header("x-apikey", api_key)
         .send()
-        .await?;
+        .await
+        .map_err(|e| format!("VirusTotal check failed (network error) — result inconclusive: {e}"))?;
 
     if !resp.status().is_success() {
-        return Ok(None);
+        let s = resp.status();
+        return Err(format!(
+            "VirusTotal check failed (HTTP {s}) — result inconclusive"
+        ));
     }
 
-    let json: serde_json::Value = resp.json().await?;
+    let json: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("VirusTotal response parse error — result inconclusive: {e}"))?;
     let malicious = json
         .pointer("/data/attributes/last_analysis_stats/malicious")
         .and_then(|v| v.as_u64())

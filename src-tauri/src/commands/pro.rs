@@ -86,6 +86,12 @@ pub async fn open_upgrade_page(
         .ok_or_else(|| "worker_url not set in config.toml — add it and restart".to_string())?
         .to_string();
 
+    // Persist email so cancel_subscription can include it for ownership verification.
+    {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        db::set_setting(&conn, "pro_email", &email).map_err(|e| e.to_string())?;
+    }
+
     let resp = client
         .post(format!("{worker_url}/init-checkout"))
         .json(&serde_json::json!({ "device_id": device_id, "email": email }))
@@ -127,11 +133,15 @@ pub async fn cancel_subscription(
     config: State<'_, ConfigState>,
     client: State<'_, reqwest::Client>,
 ) -> Result<(), String> {
-    let device_id = {
+    let (device_id, pro_email) = {
         let conn = db.0.lock().map_err(|e| e.to_string())?;
-        db::get_setting(&conn, "device_id")
+        let did = db::get_setting(&conn, "device_id")
             .map_err(|e| e.to_string())?
-            .ok_or_else(|| "device_id not set".to_string())?
+            .ok_or_else(|| "device_id not set".to_string())?;
+        let em = db::get_setting(&conn, "pro_email")
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default();
+        (did, em)
     };
 
     let worker_url = config
@@ -144,7 +154,7 @@ pub async fn cancel_subscription(
 
     let resp = client
         .post(format!("{worker_url}/cancel-subscription"))
-        .json(&serde_json::json!({ "device_id": device_id }))
+        .json(&serde_json::json!({ "device_id": device_id, "email": pro_email }))
         .send()
         .await
         .map_err(|e| format!("could not reach payment server: {e}"))?;

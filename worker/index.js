@@ -42,19 +42,20 @@ const patternIdlFactory = ({ IDL }) => {
  */
 async function verifyAndParsePaystackEvent(body, sigHeader, secret) {
   if (!sigHeader) throw new Error('missing x-paystack-signature header')
+  // SHA-512 HMAC hex is always exactly 128 hex chars — reject malformed headers early.
+  if (!/^[0-9a-f]{128}$/i.test(sigHeader)) throw new Error('malformed signature header')
   const encoder = new TextEncoder()
   const key = await crypto.subtle.importKey(
     'raw',
     encoder.encode(secret),
     { name: 'HMAC', hash: 'SHA-512' },
     false,
-    ['sign']
+    ['verify']
   )
-  const sigBytes = await crypto.subtle.sign('HMAC', key, encoder.encode(body))
-  const computed = Array.from(new Uint8Array(sigBytes))
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('')
-  if (computed !== sigHeader) throw new Error('invalid paystack signature')
+  // Decode hex → bytes and use subtle.verify() for constant-time comparison.
+  const sigBytes = new Uint8Array(sigHeader.match(/.{2}/g).map(b => parseInt(b, 16)))
+  const valid = await crypto.subtle.verify('HMAC', key, sigBytes, encoder.encode(body))
+  if (!valid) throw new Error('invalid paystack signature')
   return JSON.parse(body)
 }
 
@@ -483,6 +484,46 @@ function generateHexToken() {
 }
 
 /**
+ * Escapes characters with special HTML meaning so user-controlled values
+ * can be safely embedded in HTML without enabling XSS.
+ *
+ * Args:
+ *   str: The string to escape.
+ *
+ * Returns:
+ *   HTML-safe string with &, <, >, ", ' replaced by entities.
+ */
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+/**
+ * Enforces a per-IP rate limit using KV as a sliding counter store.
+ * Each unique (action, ip) pair is allowed maxPerMinute requests per 60-second window.
+ *
+ * Args:
+ *   env:          Worker environment (RELAY_LICENCES KV).
+ *   ip:           Client IP string (from CF-Connecting-IP header).
+ *   action:       Short key identifying the action being limited (e.g. 'key-status').
+ *   maxPerMinute: Maximum requests allowed in the 60-second window.
+ *
+ * Returns:
+ *   true if the request is within the limit, false if it should be rejected.
+ */
+async function checkRateLimit(env, ip, action, maxPerMinute) {
+  const key = `rl:${action}:${ip}`
+  const count = parseInt(await env.RELAY_LICENCES.get(key) ?? '0', 10)
+  if (count >= maxPerMinute) return false
+  await env.RELAY_LICENCES.put(key, String(count + 1), { expirationTtl: 60 })
+  return true
+}
+
+/**
  * Handles POST /webhook — verifies the Paystack HMAC-SHA512 signature, enforces
  * idempotency via KV, and dispatches each event to the correct handler.
  *
@@ -504,6 +545,14 @@ async function handleWebhook(request, env) {
     )
   } catch (err) {
     return new Response(`invalid signature: ${err.message}`, { status: 400 })
+  }
+
+  // Reject events outside the 5-minute window — prevents replay attacks.
+  // Three guards: NaN/missing (!isFinite), future-dated (< 0), and stale (> 5min).
+  const eventTs = event.createdAt ? new Date(event.createdAt).getTime() : NaN
+  const ageSecs = Date.now() - eventTs
+  if (!Number.isFinite(ageSecs) || ageSecs < 0 || ageSecs > 5 * 60 * 1000) {
+    return new Response('event timestamp out of window', { status: 400 })
   }
 
   // Idempotency — Paystack event ID, 7-day TTL (Paystack retries for ~3 days).
@@ -556,16 +605,20 @@ async function handleWebhook(request, env) {
           await env.RELAY_LICENCES.put(`api_sub:${subCode}`, apiKey)
           await env.RELAY_LICENCES.put(`api_plan:${subCode}`, plan)
         }
-        await env.RELAY_LICENCES.put(`api:${apiKey}`, 'active')
+        await env.RELAY_LICENCES.put(`api:${apiKey}`, 'active', { expirationTtl: 32 * 24 * 60 * 60 })
         // Map reference → key so /api/callback can display it.
         await env.RELAY_LICENCES.put(`ref:${ref}`, JSON.stringify({ type: 'api_key', apiKey }), { expirationTtl: 25 * 60 * 60 })
         await callGrantApiKey(agent, identityId, apiKey, expiry)
         // Map email → key so the desktop app can poll for it.
         const keyEmail = event.data.customer?.email ?? ''
         if (keyEmail) {
-          await env.RELAY_LICENCES.put(`email_key:${keyEmail}`, JSON.stringify({ apiKey, plan, expiry }))
+          await env.RELAY_LICENCES.put(
+            `email_key:${keyEmail}`,
+            JSON.stringify({ apiKey, plan, expiry }),
+            { expirationTtl: 24 * 60 * 60 }
+          )
           if (subCode) {
-            await env.RELAY_LICENCES.put(`api_sublookup:${apiKey}`, subCode)
+            await env.RELAY_LICENCES.put(`api_sublookup:${apiKey}`, subCode, { expirationTtl: 32 * 24 * 60 * 60 })
             await env.RELAY_LICENCES.put(`api_email:${subCode}`, keyEmail)
           }
         }
@@ -582,6 +635,11 @@ async function handleWebhook(request, env) {
           await env.RELAY_LICENCES.put(`sub:${subCode}`, deviceId)
           // Reverse lookup: device_id → sub_code for in-app cancellation.
           await env.RELAY_LICENCES.put(`sub_lookup:${deviceId}`, subCode)
+          // Store email for ownership verification in the cancel endpoint.
+          const proEmail = event.data.customer?.email ?? ''
+          if (proEmail) {
+            await env.RELAY_LICENCES.put(`sub_email:${deviceId}`, proEmail)
+          }
         }
         const expiry = Math.floor(Date.now() / 1000) + 31 * 24 * 60 * 60
         await callGrantProWithTimeout(agent, identityId, deviceId, expiry)
@@ -596,6 +654,12 @@ async function handleWebhook(request, env) {
         const plan   = await env.RELAY_LICENCES.get(`api_plan:${subCode}`) ?? 'monthly'
         const expiry = expiryForPlan(plan)
         await callGrantApiKey(agent, identityId, apiKey, expiry)
+        // Refresh KV TTLs so an active subscription self-heals if a disable webhook was missed.
+        await env.RELAY_LICENCES.put(`api:${apiKey}`, 'active', { expirationTtl: 32 * 24 * 60 * 60 })
+        const subCodeForRefresh = await env.RELAY_LICENCES.get(`api_sublookup:${apiKey}`)
+        if (subCodeForRefresh) {
+          await env.RELAY_LICENCES.put(`api_sublookup:${apiKey}`, subCodeForRefresh, { expirationTtl: 32 * 24 * 60 * 60 })
+        }
         return new Response('ok', { status: 200 })
       }
 
@@ -674,16 +738,18 @@ async function handleApiExport(request, env) {
 
   if (!token) return new Response('missing token', { status: 400 })
 
-  // Check the token has not already been used.
-  if (await env.RELAY_LICENCES.get(`snap_used:${token}`)) {
-    return new Response('token already used', { status: 403 })
+  // Validate and atomically consume the token.
+  const tokenRecord = await env.RELAY_LICENCES.get(`snap:${token}`)
+  if (!tokenRecord) {
+    // Either never existed, already consumed, or expired.
+    return new Response('invalid, expired, or already-used token', { status: 403 })
   }
-  // Check the token exists and is still valid.
-  if (!await env.RELAY_LICENCES.get(`snap:${token}`)) {
-    return new Response('invalid or expired token', { status: 403 })
-  }
-
-  // Mark as used before fetching — prevents double-use in concurrent requests.
+  // Delete the token key before fetching — this is the consumption point.
+  // Any concurrent request that passes the existence check above but loses the
+  // race here will find snap: gone on its next operation and return 403.
+  await env.RELAY_LICENCES.delete(`snap:${token}`)
+  // Belt-and-suspenders tombstone so the export endpoint still rejects if the
+  // delete somehow races (KV eventual consistency window ~50ms).
   await env.RELAY_LICENCES.put(`snap_used:${token}`, '1', { expirationTtl: 25 * 60 * 60 })
 
   let entries
@@ -785,14 +851,19 @@ async function handleApiCallback(request, env) {
 </head>
 <body>
   <h1>ReLay Threat Intelligence</h1>
-  <h2>${heading}</h2>
-  <p>${label}:</p>
-  <div class="credential">${value}</div>
+  <h2>${escapeHtml(heading)}</h2>
+  <p>${escapeHtml(label)}:</p>
+  <div class="credential">${escapeHtml(value)}</div>
   <p class="note">${note}</p>
 </body>
 </html>`
 
-  return new Response(html, { headers: { 'Content-Type': 'text/html' } })
+  return new Response(html, {
+    headers: {
+      'Content-Type': 'text/html',
+      'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'",
+    },
+  })
 }
 
 // ── Main router ──────────────────────────────────────────────────────────────
@@ -817,11 +888,31 @@ async function handleCancelSubscription(request, env) {
   } catch {
     return new Response('invalid JSON body', { status: 400 })
   }
-  const { device_id } = body
+  const { device_id, email } = body
   if (!device_id) return new Response('missing device_id', { status: 400 })
+  if (!email) return new Response('missing email', { status: 400 })
 
   const subCode = await env.RELAY_LICENCES.get(`sub_lookup:${device_id}`)
   if (!subCode) return new Response('no active subscription found', { status: 404 })
+
+  // Verify the provided email matches the owner recorded at subscription time.
+  const storedEmail = await env.RELAY_LICENCES.get(`sub_email:${device_id}`)
+  if (!storedEmail) {
+    // Legacy subscription — sub_email: KV entry was not written at payment time.
+    // Fall back to verifying ownership against the Paystack subscription record directly.
+    const legacyResp = await fetch(`https://api.paystack.co/subscription/${subCode}`, {
+      headers: { Authorization: `Bearer ${env.PAYSTACK_SECRET_KEY}` },
+    })
+    const legacyJson = await legacyResp.json()
+    const legacyEmail = legacyJson.data?.customer?.email ?? ''
+    if (!legacyEmail || legacyEmail.toLowerCase() !== email.toLowerCase()) {
+      return new Response('email does not match subscription record', { status: 403 })
+    }
+    // Back-fill the KV entry so future cancellations skip this Paystack lookup.
+    await env.RELAY_LICENCES.put(`sub_email:${device_id}`, legacyEmail)
+  } else if (storedEmail.toLowerCase() !== email.toLowerCase()) {
+    return new Response('email does not match subscription record', { status: 403 })
+  }
 
   // Retrieve the subscription to get the email_token required by Paystack's disable endpoint.
   const subResp = await fetch(`https://api.paystack.co/subscription/${subCode}`, {
@@ -864,8 +955,14 @@ async function handleCancelSubscription(request, env) {
 async function handleApiKeyStatus(request, env) {
   const email = new URL(request.url).searchParams.get('email')
   if (!email) return new Response('missing email', { status: 400 })
+  const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown'
+  if (!await checkRateLimit(env, ip, 'key-status', 10)) {
+    return new Response('too many requests', { status: 429 })
+  }
   const raw = await env.RELAY_LICENCES.get(`email_key:${email}`)
   if (!raw) return new Response('not found', { status: 404 })
+  // Delete after retrieval — single-use to prevent credential harvesting by email alone.
+  await env.RELAY_LICENCES.delete(`email_key:${email}`)
   return new Response(JSON.stringify({ type: 'api_key', ...JSON.parse(raw) }), {
     headers: { 'Content-Type': 'application/json' },
   })
@@ -886,8 +983,14 @@ async function handleApiKeyStatus(request, env) {
 async function handleApiSnapStatus(request, env) {
   const email = new URL(request.url).searchParams.get('email')
   if (!email) return new Response('missing email', { status: 400 })
+  const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown'
+  if (!await checkRateLimit(env, ip, 'snap-status', 10)) {
+    return new Response('too many requests', { status: 429 })
+  }
   const raw = await env.RELAY_LICENCES.get(`email_snap:${email}`)
   if (!raw) return new Response('not found', { status: 404 })
+  // Delete after retrieval — single-use to prevent credential harvesting by email alone.
+  await env.RELAY_LICENCES.delete(`email_snap:${email}`)
   return new Response(JSON.stringify({ type: 'snapshot', ...JSON.parse(raw) }), {
     headers: { 'Content-Type': 'application/json' },
   })
@@ -928,6 +1031,12 @@ async function handleCancelApiSubscription(request, env) {
   })
   const subJson = await subResp.json()
   if (!subJson.status) return new Response('could not retrieve subscription details', { status: 502 })
+
+  // Verify the provided email matches the subscription's actual owner on Paystack.
+  const subEmail = subJson.data?.customer?.email ?? ''
+  if (subEmail.toLowerCase() !== email.toLowerCase()) {
+    return new Response('email does not match subscription record', { status: 403 })
+  }
 
   const emailToken = subJson.data?.email_token
   if (!emailToken) return new Response('subscription has no email_token', { status: 502 })

@@ -3,6 +3,26 @@ use crate::icp::agent::{self, Proposal};
 use crate::icp::ConfigState;
 use tauri::State;
 
+/// Returns the Unix timestamp of the last successful ICP pattern sync and
+/// the total number of patterns in the local cache.
+/// last_sync_ts is 0 when a sync has never completed successfully.
+///
+/// Args:
+///   db: Tauri-managed database state.
+///
+/// Returns:
+///   Ok(JSON { last_sync_ts: u64, pattern_count: u64 }) on success, Err on DB failure.
+#[tauri::command]
+pub fn get_pattern_sync_info(db: State<'_, DbState>) -> Result<serde_json::Value, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let last_sync = db::get_setting(&conn, "last_pattern_sync")
+        .map_err(|e| e.to_string())?
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
+    let count = db::count_icp_patterns(&conn).map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "last_sync_ts": last_sync, "pattern_count": count }))
+}
+
 /// Submits a quarantined file's SHA-256 to the governance canister for community review.
 /// Looks up the sha256 from the quarantine table, then calls governance::submit_proposal.
 ///

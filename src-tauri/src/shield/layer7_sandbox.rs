@@ -65,6 +65,8 @@ pub async fn scan(ctx: &ScanContext) -> (LayerResult, Option<SandboxReport>) {
 
     // Spawn under sandbox-exec with a 45-second hard timeout.
     // Use spawn() + wait() so we hold the child handle and can kill it on timeout.
+    // Safety: args() calls execv() directly — no shell interpolation occurs,
+    // so metacharacters in path_str are inert.
     let mut child = match tokio::process::Command::new("sandbox-exec")
         .args(["-p", profile, &path_str])
         .spawn()

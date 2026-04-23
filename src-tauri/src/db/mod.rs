@@ -763,6 +763,18 @@ pub fn lookup_icp_pattern(conn: &Connection, sha256: &str) -> Result<Option<Stri
     }
 }
 
+/// Returns the total number of threat patterns in the local ICP pattern cache.
+///
+/// Args:
+///   conn: Open database connection.
+///
+/// Returns:
+///   Row count on success, Err on query failure.
+pub fn count_icp_patterns(conn: &Connection) -> Result<u64> {
+    conn.query_row("SELECT COUNT(*) FROM icp_patterns", [], |r| r.get::<_, i64>(0))
+        .map(|n| n as u64)
+}
+
 /// Returns true if a non-terminal HTTP download for this URL already exists.
 /// Blocks adding a duplicate when the same URL is already queued, downloading, or paused.
 ///

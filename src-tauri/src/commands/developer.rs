@@ -182,6 +182,9 @@ pub async fn poll_developer_status(
     if key_resp.status().as_u16() == 200 {
         let json: serde_json::Value = key_resp.json().await.map_err(|e| e.to_string())?;
         let api_key = json["apiKey"].as_str().unwrap_or("").to_string();
+        if api_key.len() != 64 || !api_key.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err("worker returned malformed API key — try again".to_string());
+        }
         let plan    = json["plan"].as_str().unwrap_or("monthly").to_string();
         let expiry  = json["expiry"].as_u64().unwrap_or(0);
         persist_credentials(&db, &email, &api_key, &plan, expiry)?;
@@ -200,6 +203,9 @@ pub async fn poll_developer_status(
     if snap_resp.status().as_u16() == 200 {
         let json: serde_json::Value = snap_resp.json().await.map_err(|e| e.to_string())?;
         let token  = json["token"].as_str().unwrap_or("").to_string();
+        if token.len() != 64 || !token.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err("worker returned malformed snapshot token — try again".to_string());
+        }
         let expiry = json["expiry"].as_u64().unwrap_or(0);
         persist_credentials(&db, &email, &token, "snapshot", expiry)?;
         return Ok(DevStatus {
@@ -274,13 +280,29 @@ pub async fn download_threat_export(
     config: State<'_, ConfigState>,
     client: State<'_, reqwest::Client>,
 ) -> Result<(), String> {
-    let token = {
+    let (token, api_expiry) = {
         let conn = db.0.lock().map_err(|e| e.to_string())?;
-        db::get_setting(&conn, "api_key")
+        let t = db::get_setting(&conn, "api_key")
             .map_err(|e| e.to_string())?
             .filter(|k| !k.is_empty())
-            .ok_or_else(|| "no snapshot token stored".to_string())?
+            .ok_or_else(|| "no snapshot token stored".to_string())?;
+        let e = db::get_setting(&conn, "api_expiry")
+            .map_err(|e| e.to_string())?
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(0);
+        (t, e)
     };
+
+    if api_expiry > 0 {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        if now > api_expiry {
+            return Err("credential has expired — renew your subscription".to_string());
+        }
+    }
+
     let worker_url = get_worker_url(&config)?;
 
     let resp = client

@@ -166,6 +166,14 @@ async fn sync_patterns_once(app: &tauri::AppHandle, config: &AppConfig) -> Resul
     let entries = agent::get_delta_since(&agent, &pattern_id, since_id).await?;
 
     if entries.is_empty() {
+        // No new entries but sync succeeded — record the timestamp.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let conn = db_state.0.lock().unwrap_or_else(|p| p.into_inner());
+        db::set_setting(&conn, "last_pattern_sync", &now.to_string())
+            .map_err(|e| IcpError::Decode(e.to_string()))?;
         return Ok(());
     }
 
@@ -176,6 +184,12 @@ async fn sync_patterns_once(app: &tauri::AppHandle, config: &AppConfig) -> Resul
         db::upsert_icp_patterns(&conn, &entries)
             .map_err(|e| IcpError::Decode(e.to_string()))?;
         db::set_setting(&conn, "last_pattern_id", &new_last_id.to_string())
+            .map_err(|e| IcpError::Decode(e.to_string()))?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        db::set_setting(&conn, "last_pattern_sync", &now.to_string())
             .map_err(|e| IcpError::Decode(e.to_string()))?;
     }
 

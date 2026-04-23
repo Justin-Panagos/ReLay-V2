@@ -56,6 +56,7 @@ pub enum LifecycleOutcome {
 ///   client:         Shared reqwest client for chunk 1..N requests.
 ///   token:          CancellationToken — fire to pause or cancel this download.
 ///   resume_offsets: Optional per-chunk snapshots from a previous paused session.
+///   max_chunks:     Upper bound on chunk count — pass FREE_TIER_CHUNKS or PRO_TIER_CHUNKS.
 ///
 /// Returns:
 ///   Ok(LifecycleOutcome) on clean finish or pause. Err(message) if any chunk errors.
@@ -70,9 +71,10 @@ pub async fn download_chunked(
     client: reqwest::Client,
     token: CancellationToken,
     resume_offsets: Option<Vec<ChunkSnapshot>>,
+    max_chunks: usize,
 ) -> Result<LifecycleOutcome, String> {
     let chunk_count =
-        ((total_size / MIN_CHUNK_BYTES) as usize).clamp(1, FREE_TIER_CHUNKS);
+        ((total_size / MIN_CHUNK_BYTES) as usize).clamp(1, max_chunks);
     let chunk_size = total_size / chunk_count as u64;
 
     // Build the (start, end) plan for each chunk.

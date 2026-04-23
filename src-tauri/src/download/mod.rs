@@ -382,7 +382,7 @@ async fn run_download(
         }
     }
 
-    // Pro users get 16 parallel chunks; Free users get 8.
+    // Pro users get PRO_TIER_CHUNKS parallel chunks; Free users get FREE_TIER_CHUNKS.
     let max_chunks = if app
         .try_state::<crate::pro::LicenceCacheState>()
         .map(|cache| crate::pro::is_pro(&cache))
@@ -411,6 +411,7 @@ async fn run_download(
             client,
             token,
             None,
+            max_chunks,
         )
         .await
     } else {
@@ -478,6 +479,16 @@ async fn run_download_resume(
         return Err(format!("HTTP {} on resume probe", probe_response.status()));
     }
 
+    let max_chunks = if app
+        .try_state::<crate::pro::LicenceCacheState>()
+        .map(|cache| crate::pro::is_pro(&cache))
+        .unwrap_or(false)
+    {
+        chunked::PRO_TIER_CHUNKS
+    } else {
+        chunked::FREE_TIER_CHUNKS
+    };
+
     // Pass resume_offsets to the chunked engine; it adjusts each chunk's start byte.
     chunked::download_chunked(
         url.to_string(),
@@ -489,6 +500,7 @@ async fn run_download_resume(
         client,
         token,
         Some(snapshots),
+        max_chunks,
     )
     .await
 }

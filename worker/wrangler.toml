@@ -4,22 +4,5 @@ compatibility_date = "2024-01-01"
 
 [[kv_namespaces]]
 binding = "RELAY_LICENCES"
-id = "53152d04f47e438daf950a2c4bad0ec1"      
-preview_id = "59449b45351c4fbbb631b8f59aa15290" 
-
-# Secrets — set via `wrangler secret put <NAME>`:
-#   PAYSTACK_SECRET_KEY      — Paystack secret key from Dashboard → Settings → API Keys
-#   WORKER_PRIVATE_KEY_PEM   — PKCS#8 PEM of the Ed25519 key that is a canister controller
-#                              Generate: dfx identity new worker-identity
-#                                        dfx identity export worker-identity
-#   IDENTITY_CANISTER_ID     — principal of the deployed identity canister
-#   PATTERN_CANISTER_ID      — principal of the deployed pattern canister
-#   PAYSTACK_PRO_PLAN        — Paystack plan code for monthly Pro subscription
-#   PAYSTACK_DEVELOPER_PLAN  — Paystack plan code for monthly Developer API feed
-
-
-# Your seed phrase for identity 'relay-deployer': search liar float clarify stable perfect venue true album drill ankle spider vault summer dentist tourist couch edge rough misery because cricket diet pride
-# This can be used to reconstruct your key in case of emergency, so write it down in a safe place.
-# Created identity: "relay-deployer".
-
-# icp canister address : b7ef41134b95429444f554f7867829c64828a495064df89fd0657b4e6c80c415
+id = "53152d04f47e438daf950a2c4bad0ec1"
+preview_id = "59449b45351c4fbbb631b8f59aa15290"
