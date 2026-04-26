@@ -4,7 +4,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/tauri'
-import { showErrorToast } from './toast.js'
+import { showErrorToast, showInfoToast } from './toast.js'
 
 // ── Module state ──────────────────────────────────────────────────────────────
 // Keys and tokens are kept in JS closure only — never written to the DOM.
@@ -344,17 +344,3 @@ function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
 }
 
-/**
- * Shows a success toast with the given message.
- *
- * Args:
- *   message: Text to display.
- */
-function showInfoToast(message) {
-  const el = document.createElement('div')
-  el.className   = 'toast'
-  el.textContent = message
-  el.addEventListener('click', () => el.remove())
-  document.body.appendChild(el)
-  setTimeout(() => el.remove(), 4000)
-}

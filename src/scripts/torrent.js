@@ -68,7 +68,7 @@ export function addTorrentCard(id, name, destination = '') {
 
   card.querySelector('.card-pause').addEventListener('click', async (e) => {
     e.stopPropagation()
-    console.log(`[torrent] invoking pause_torrent id=${id}`)
+
     try {
       await invoke('pause_torrent', { id })
     } catch (err) {
@@ -79,7 +79,7 @@ export function addTorrentCard(id, name, destination = '') {
 
   card.querySelector('.card-resume').addEventListener('click', async (e) => {
     e.stopPropagation()
-    console.log(`[torrent] invoking resume_torrent id=${id}`)
+
     try {
       await invoke('resume_torrent', { id })
       setTorrentCardResuming(id)
@@ -91,7 +91,6 @@ export function addTorrentCard(id, name, destination = '') {
 
   card.querySelector('.card-cancel').addEventListener('click', async (e) => {
     e.stopPropagation()
-    console.log(`[torrent] invoking cancel_torrent id=${id}`)
     try {
       await invoke('cancel_torrent', { id })
     } catch (err) {
@@ -108,7 +107,7 @@ export function addTorrentCard(id, name, destination = '') {
   card.querySelector('.card-seed-stop').addEventListener('click', async (e) => {
     e.stopPropagation()
     card.querySelector('.card-seed-dropdown').classList.add('hidden')
-    console.log(`[torrent] invoking cancel_torrent (stop seeding) id=${id}`)
+
     try {
       await invoke('cancel_torrent', { id })
     } catch (err) {

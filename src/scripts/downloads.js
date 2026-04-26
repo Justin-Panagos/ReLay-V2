@@ -166,6 +166,49 @@ export function setCardPaused(id) {
 }
 
 /**
+ * Updates a download card to the retrying state — amber icon, "Retrying…" status,
+ * and shows a small retry attempt badge on the card.
+ *
+ * Args:
+ *   id:      The download id.
+ *   attempt: Which retry attempt is starting (1–4).
+ */
+export function setCardRetrying(id, attempt) {
+  const card = document.querySelector(`.download-card[data-id="${id}"]`)
+  if (!card) return
+
+  const icon = card.querySelector('.card-type-icon')
+  icon.className = 'card-type-icon status-paused'
+  icon.innerHTML = '&#8635;'
+
+  card.querySelector('.card-status').textContent = `Retrying… (${attempt}/4)`
+  card.querySelector('.card-speed').textContent = ''
+  card.querySelector('.card-pause').style.display = 'none'
+  card.querySelector('.card-resume').style.display = 'none'
+
+  let badge = card.querySelector('.card-retry-badge')
+  if (!badge) {
+    badge = document.createElement('span')
+    badge.className = 'card-retry-badge'
+    card.querySelector('.card-body').appendChild(badge)
+  }
+  badge.textContent = attempt
+}
+
+/**
+ * Removes the retry badge from a download card.
+ * Called on complete or final error to clear the retry indicator.
+ *
+ * Args:
+ *   id: The download id.
+ */
+export function clearRetryBadge(id) {
+  const card = document.querySelector(`.download-card[data-id="${id}"]`)
+  if (!card) return
+  card.querySelector('.card-retry-badge')?.remove()
+}
+
+/**
  * Updates a download card from paused back to the downloading state —
  * restores the downloading icon and swaps resume back to pause.
  *
@@ -243,6 +286,101 @@ export function setCardQuarantined(id, reason) {
     reasonEl.textContent = reason
     meta.appendChild(reasonEl)
   }
+}
+
+/**
+ * Makes a download card draggable (Pro queue reorder).
+ * Adds draggable="true" and a visual drag handle indicator.
+ *
+ * Args:
+ *   id: The download id.
+ */
+export function enableCardDrag(id) {
+  const card = document.querySelector(`.download-card[data-id="${id}"]`)
+  if (!card) return
+  card.setAttribute('draggable', 'true')
+  card.classList.add('card-draggable')
+}
+
+/**
+ * Injects schedule time inputs into a download card (Pro scheduling).
+ * Shows start/end time fields; invokes set_download_schedule on change.
+ *
+ * Args:
+ *   id:       The download id.
+ *   startVal: Pre-populated start time "HH:MM", or empty string.
+ *   endVal:   Pre-populated end time "HH:MM", or empty string.
+ */
+export function addScheduleInputs(id, startVal = '', endVal = '') {
+  const card = document.querySelector(`.download-card[data-id="${id}"]`)
+  if (!card || card.querySelector('.card-schedule')) return
+
+  const row = document.createElement('div')
+  row.className = 'card-schedule'
+  row.innerHTML = `
+    <span class="card-schedule-label">Schedule <span class="card-schedule-utc">(UTC)</span></span>
+    <input type="time" class="card-sched-start" title="Start time (UTC)">
+    <span class="card-schedule-sep">–</span>
+    <input type="time" class="card-sched-end" title="End time (UTC)">
+  `
+
+  const startEl = row.querySelector('.card-sched-start')
+  const endEl   = row.querySelector('.card-sched-end')
+  if (startVal) startEl.value = startVal
+  if (endVal)   endEl.value   = endVal
+
+  let schedTimer = null
+
+  function onChange() {
+    clearTimeout(schedTimer)
+    schedTimer = setTimeout(async () => {
+      const s = startEl.value || null
+      const e = endEl.value || null
+      try { await invoke('set_download_schedule', { id, start: s, end: e }) } catch { /* no-op */ }
+    }, 500)
+  }
+
+  startEl.addEventListener('change', onChange)
+  endEl.addEventListener('change', onChange)
+
+  card.querySelector('.card-body').appendChild(row)
+}
+
+/**
+ * Injects a bandwidth limit slider into a download card (Pro only).
+ * Slider range: 0 (unlimited) to 50 000 kbps. Debounced 400 ms.
+ * Invokes set_download_bandwidth on change; shows current value as a label.
+ *
+ * Args:
+ *   id:          The download id.
+ *   initialKbps: Pre-populated kbps value (0 = unlimited).
+ */
+export function addBandwidthSlider(id, initialKbps = 0) {
+  const card = document.querySelector(`.download-card[data-id="${id}"]`)
+  if (!card || card.querySelector('.card-bandwidth')) return
+
+  const row = document.createElement('div')
+  row.className = 'card-bandwidth'
+  row.innerHTML = `
+    <span class="card-bandwidth-label">Speed</span>
+    <input type="range" class="card-bw-slider" min="0" max="50000" step="100" value="${initialKbps}">
+    <span class="card-bw-value">${initialKbps === 0 ? 'Unlimited' : initialKbps + ' kbps'}</span>
+  `
+
+  const slider = row.querySelector('.card-bw-slider')
+  const valueEl = row.querySelector('.card-bw-value')
+  let bwTimer = null
+
+  slider.addEventListener('input', () => {
+    const kbps = parseInt(slider.value, 10)
+    valueEl.textContent = kbps === 0 ? 'Unlimited' : `${kbps} kbps`
+    clearTimeout(bwTimer)
+    bwTimer = setTimeout(async () => {
+      try { await invoke('set_download_bandwidth', { id, kbps }) } catch { /* no-op */ }
+    }, 400)
+  })
+
+  card.querySelector('.card-body').appendChild(row)
 }
 
 /**

@@ -134,7 +134,9 @@ body {
 .popup-footer {
   padding: 8px 14px;
   border-top: 1px solid var(--border);
-  text-align: right;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .footer-link {
@@ -145,6 +147,17 @@ body {
 }
 
 .footer-link:hover { text-decoration: underline; }
+
+.footer-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.footer-toggle input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 
 /* ── Install prompt ── */
 #install-prompt {

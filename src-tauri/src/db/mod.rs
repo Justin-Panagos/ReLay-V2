@@ -75,6 +75,13 @@ fn migrations() -> Migrations<'static> {
             );
             CREATE INDEX icp_patterns_sha256_idx ON icp_patterns (sha256);",
         ),
+        // v7 — auto-retry counter + bandwidth limit + schedule window (Pro queue management)
+        M::up(
+            "ALTER TABLE downloads ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0;
+             ALTER TABLE downloads ADD COLUMN bandwidth_limit_kbps INTEGER NOT NULL DEFAULT 0;
+             ALTER TABLE downloads ADD COLUMN schedule_start TEXT;
+             ALTER TABLE downloads ADD COLUMN schedule_end TEXT;",
+        ),
     ])
 }
 
@@ -86,17 +93,17 @@ fn migrations() -> Migrations<'static> {
 ///   app_data_dir: Path to the OS-specific app data directory from Tauri's path resolver.
 ///
 /// Returns:
-///   An open rusqlite Connection ready for use.
-pub fn init_db(app_data_dir: PathBuf) -> Result<Connection> {
+///   An open rusqlite Connection ready for use, or an error message string.
+pub fn init_db(app_data_dir: PathBuf) -> std::result::Result<Connection, String> {
     std::fs::create_dir_all(&app_data_dir)
-        .expect("could not create app data directory");
+        .map_err(|e| format!("could not create app data directory: {e}"))?;
 
     let db_path = app_data_dir.join("relay.db");
-    let mut conn = Connection::open(db_path)?;
+    let mut conn = Connection::open(db_path).map_err(|e| e.to_string())?;
 
     migrations()
         .to_latest(&mut conn)
-        .expect("database migration failed");
+        .map_err(|e| format!("database migration failed: {e}"))?;
 
     seed_defaults(&conn);
 
@@ -187,6 +194,10 @@ pub struct DownloadRecord {
     pub sha256: Option<String>,
     pub scan_threat: Option<String>,
     pub sandbox_report: Option<String>,
+    pub retry_count: i64,
+    pub schedule_start: Option<String>,
+    pub schedule_end: Option<String>,
+    pub bandwidth_limit_kbps: i64,
 }
 
 /// Per-chunk byte-offset snapshot used to resume a paused chunked download.
@@ -293,7 +304,8 @@ pub fn get_recent_downloads(conn: &Connection, limit: i64) -> Result<Vec<Downloa
     let mut stmt = conn.prepare(
         "SELECT id, url, filename, destination, status,
                 size_bytes, downloaded_bytes, created_at, completed_at, paused_at,
-                type, torrent_id, sha256, scan_threat, sandbox_report
+                type, torrent_id, sha256, scan_threat, sandbox_report,
+                retry_count, schedule_start, schedule_end, bandwidth_limit_kbps
          FROM downloads
          ORDER BY created_at DESC
          LIMIT ?1",
@@ -316,6 +328,10 @@ pub fn get_recent_downloads(conn: &Connection, limit: i64) -> Result<Vec<Downloa
             sha256: row.get(12)?,
             scan_threat: row.get(13)?,
             sandbox_report: row.get(14)?,
+            retry_count: row.get(15)?,
+            schedule_start: row.get(16)?,
+            schedule_end: row.get(17)?,
+            bandwidth_limit_kbps: row.get(18)?,
         })
     })?;
 
@@ -334,7 +350,8 @@ pub fn get_download_by_id(conn: &Connection, id: i64) -> Result<Option<DownloadR
     let mut stmt = conn.prepare(
         "SELECT id, url, filename, destination, status,
                 size_bytes, downloaded_bytes, created_at, completed_at, paused_at,
-                type, torrent_id, sha256, scan_threat, sandbox_report
+                type, torrent_id, sha256, scan_threat, sandbox_report,
+                retry_count, schedule_start, schedule_end, bandwidth_limit_kbps
          FROM downloads WHERE id = ?1",
     )?;
 
@@ -355,6 +372,10 @@ pub fn get_download_by_id(conn: &Connection, id: i64) -> Result<Option<DownloadR
             sha256: row.get(12)?,
             scan_threat: row.get(13)?,
             sandbox_report: row.get(14)?,
+            retry_count: row.get(15)?,
+            schedule_start: row.get(16)?,
+            schedule_end: row.get(17)?,
+            bandwidth_limit_kbps: row.get(18)?,
         })
     })?;
 
@@ -511,7 +532,8 @@ pub fn get_torrents(conn: &Connection, limit: i64) -> Result<Vec<DownloadRecord>
     let mut stmt = conn.prepare(
         "SELECT id, url, filename, destination, status,
                 size_bytes, downloaded_bytes, created_at, completed_at, paused_at,
-                type, torrent_id, sha256, scan_threat, sandbox_report
+                type, torrent_id, sha256, scan_threat, sandbox_report,
+                retry_count, schedule_start, schedule_end, bandwidth_limit_kbps
          FROM downloads
          WHERE type = 'torrent'
          ORDER BY created_at DESC
@@ -535,6 +557,10 @@ pub fn get_torrents(conn: &Connection, limit: i64) -> Result<Vec<DownloadRecord>
             sha256: row.get(12)?,
             scan_threat: row.get(13)?,
             sandbox_report: row.get(14)?,
+            retry_count: row.get(15)?,
+            schedule_start: row.get(16)?,
+            schedule_end: row.get(17)?,
+            bandwidth_limit_kbps: row.get(18)?,
         })
     })?;
 
@@ -811,6 +837,129 @@ pub fn torrent_exists_for_url(conn: &Connection, url: &str) -> bool {
         |_| Ok(()),
     )
     .is_ok()
+}
+
+/// Updates the schedule_start and schedule_end columns for a download row.
+/// Pass None for either field to clear it (sets the column to NULL).
+///
+/// Args:
+///   conn:  Open database connection.
+///   id:    The download row id.
+///   start: "HH:MM" 24h window start, or None to clear.
+///   end:   "HH:MM" 24h window end, or None to clear.
+pub fn set_download_schedule(
+    conn: &Connection,
+    id: i64,
+    start: Option<&str>,
+    end: Option<&str>,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE downloads SET schedule_start = ?1, schedule_end = ?2 WHERE id = ?3",
+        rusqlite::params![start, end, id],
+    )?;
+    Ok(())
+}
+
+/// Returns all active HTTP downloads (status='active' or 'downloading') that have a
+/// schedule window set. Used by the schedule watchdog to decide which downloads to
+/// auto-pause when outside their window.
+///
+/// Args:
+///   conn: Open database connection.
+///
+/// Returns:
+///   Vec of (id, schedule_start, schedule_end) tuples.
+pub fn get_scheduled_active_downloads(
+    conn: &Connection,
+) -> Result<Vec<(i64, String, String)>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, schedule_start, schedule_end
+         FROM downloads
+         WHERE status = 'downloading'
+           AND schedule_start IS NOT NULL
+           AND schedule_end IS NOT NULL",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+    })?;
+    rows.collect()
+}
+
+/// Returns all paused HTTP downloads that have a schedule window set.
+/// Used by the schedule watchdog to auto-resume downloads inside their window.
+///
+/// Args:
+///   conn: Open database connection.
+///
+/// Returns:
+///   Vec of (id, schedule_start, schedule_end) tuples.
+pub fn get_scheduled_paused_downloads(
+    conn: &Connection,
+) -> Result<Vec<(i64, String, String)>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, schedule_start, schedule_end
+         FROM downloads
+         WHERE status = 'paused'
+           AND schedule_start IS NOT NULL
+           AND schedule_end IS NOT NULL",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+    })?;
+    rows.collect()
+}
+
+/// Increments the retry_count for a download row and returns the new count.
+///
+/// Args:
+///   conn: Open database connection.
+///   id:   The download row id.
+///
+/// Returns:
+///   The new retry_count value after incrementing.
+pub fn increment_retry_count(conn: &Connection, id: i64) -> Result<u32> {
+    conn.execute(
+        "UPDATE downloads SET retry_count = retry_count + 1 WHERE id = ?1",
+        [id],
+    )?;
+    let count: u32 = conn.query_row(
+        "SELECT retry_count FROM downloads WHERE id = ?1",
+        [id],
+        |row| row.get(0),
+    )?;
+    Ok(count)
+}
+
+/// Resets the retry_count for a download row to 0.
+/// Called after a successful download completion.
+///
+/// Args:
+///   conn: Open database connection.
+///   id:   The download row id.
+pub fn reset_retry_count(conn: &Connection, id: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE downloads SET retry_count = 0 WHERE id = ?1",
+        [id],
+    )?;
+    Ok(())
+}
+
+/// Persists a new bandwidth limit for a download row.
+/// Pass 0 to remove the limit (unlimited).
+///
+/// Args:
+///   conn: Open database connection.
+///   id:   The downloads table row id.
+///   kbps: Bandwidth limit in kilobits per second (0 = unlimited).
+///
+/// Returns:
+///   Ok(()) on success.
+pub fn update_bandwidth_limit(conn: &Connection, id: i64, kbps: u32) -> Result<()> {
+    conn.execute(
+        "UPDATE downloads SET bandwidth_limit_kbps = ?1 WHERE id = ?2",
+        rusqlite::params![kbps, id],
+    )?;
+    Ok(())
 }
 
 /// Returns the current time as a Unix timestamp string.

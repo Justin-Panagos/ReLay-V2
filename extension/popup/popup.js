@@ -24,6 +24,7 @@ let pollTimer = null
 async function init() {
   wireInstallLinks()
   wireOpenAppButton()
+  wirePopupBlockToggle()
 
   // If a previous download attempt set the install prompt flag, show it.
   const { showInstallPrompt } = await chrome.storage.local.get('showInstallPrompt')
@@ -69,6 +70,26 @@ function wireOpenAppButton() {
   document.getElementById('open-app-btn').addEventListener('click', (e) => {
     e.preventDefault()
     chrome.runtime.sendMessage({ type: 'get_status' }).catch(() => {})
+  })
+}
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+
+/**
+ * Reads popup_blocking_enabled from storage and wires the toggle checkbox.
+ * Changes are written back to sync storage immediately and picked up by
+ * content.js on the next page load.
+ */
+function wirePopupBlockToggle() {
+  const toggle = document.getElementById('popup-block-toggle')
+  if (!toggle) return
+
+  chrome.storage.sync.get({ popup_blocking_enabled: true }, (items) => {
+    toggle.checked = items.popup_blocking_enabled
+  })
+
+  toggle.addEventListener('change', () => {
+    chrome.storage.sync.set({ popup_blocking_enabled: toggle.checked })
   })
 }
 

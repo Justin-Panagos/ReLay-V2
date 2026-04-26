@@ -4524,6 +4524,7 @@ dependencies = [
  "tokio-util",
  "toml 0.8.23",
  "uuid",
+ "windows-sys 0.52.0",
  "winreg 0.52.0",
  "yara",
 ]

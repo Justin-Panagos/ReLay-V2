@@ -5,7 +5,7 @@ use crate::db::{self, DbState};
 use crate::shield;
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 use std::sync::Arc;
 use tauri::Manager;
 use tokio_util::sync::CancellationToken;
@@ -39,6 +39,15 @@ pub struct ErrorPayload {
 #[derive(Clone, serde::Serialize)]
 pub struct PausedPayload {}
 
+/// Payload emitted on each auto-retry attempt.
+#[derive(Clone, serde::Serialize)]
+pub struct RetryPayload {
+    /// Which retry attempt this is (1-based, max 4).
+    pub attempt: u32,
+    /// How many seconds the engine will wait before the next attempt.
+    pub wait_secs: u64,
+}
+
 /// Entry point for a fresh download. Registers the token/intent via the caller before spawning.
 ///
 /// Orchestrates the full lifecycle: download → outcome handling → queue drain.
@@ -51,6 +60,8 @@ pub struct PausedPayload {}
 ///   app:         Tauri app handle.
 ///   token:       CancellationToken from the lifecycle registry.
 ///   intent:      Intent flag (NONE/PAUSE/CANCEL) — set by pause/cancel commands.
+///   bandwidth:   Bandwidth limit in kbps (0 = unlimited), updated live via set_download_bandwidth.
+#[allow(clippy::too_many_arguments)]
 pub async fn download_file(
     url: String,
     destination: String,
@@ -59,11 +70,41 @@ pub async fn download_file(
     app: tauri::AppHandle,
     token: CancellationToken,
     intent: Arc<AtomicU8>,
+    bandwidth: Arc<AtomicU32>,
 ) {
+    const MAX_RETRIES: u32 = 4;
+    const BACKOFF_SECS: [u64; 4] = [5, 10, 20, 40];
+
     let dest_path = PathBuf::from(&destination);
     let file_path = dest_path.join(&filename);
 
-    let outcome = run_download(&url, &destination, &filename, id, &app, token).await;
+    let mut attempt = 0u32;
+    let outcome = 'retry: loop {
+        let result = run_download(&url, &destination, &filename, id, &app, token.clone(), Arc::clone(&bandwidth)).await;
+        match result {
+            Ok(o) => break 'retry Ok(o),
+            Err(e) if attempt < MAX_RETRIES && !token.is_cancelled() => {
+                let wait = BACKOFF_SECS[attempt as usize];
+                attempt += 1;
+                if let Some(db) = app.try_state::<DbState>() {
+                    let conn = db.0.lock().unwrap_or_else(|p| p.into_inner());
+                    db::increment_retry_count(&conn, id).ok();
+                    db::update_download_status(&conn, id, "retrying").ok();
+                }
+                app.emit_all(
+                    &format!("download://retry/{id}"),
+                    RetryPayload { attempt, wait_secs: wait },
+                )
+                .ok();
+                tokio::select! {
+                    _ = tokio::time::sleep(tokio::time::Duration::from_secs(wait)) => {}
+                    _ = token.cancelled() => { break 'retry Err(e); }
+                }
+            }
+            Err(e) => break 'retry Err(e),
+        }
+    };
+
     handle_outcome(outcome, intent, id, &file_path, &url, &filename, &app).await;
 
     // Clean up lifecycle registry and drain the queue.
@@ -77,15 +118,17 @@ pub async fn download_file(
 /// Loads chunk snapshots from DB and continues from the saved byte offsets.
 ///
 /// Args:
-///   id:     The downloads table row id to resume.
-///   app:    Tauri app handle.
-///   token:  Fresh CancellationToken from the lifecycle registry.
-///   intent: Intent flag — set by pause/cancel commands.
+///   id:        The downloads table row id to resume.
+///   app:       Tauri app handle.
+///   token:     Fresh CancellationToken from the lifecycle registry.
+///   intent:    Intent flag — set by pause/cancel commands.
+///   bandwidth: Bandwidth limit in kbps (0 = unlimited).
 pub async fn download_file_resume(
     id: i64,
     app: tauri::AppHandle,
     token: CancellationToken,
     intent: Arc<AtomicU8>,
+    bandwidth: Arc<AtomicU32>,
 ) {
     // Load record and snapshots from DB.
     let (record, snapshots) = {
@@ -101,6 +144,9 @@ pub async fn download_file_resume(
     };
 
     let file_path = PathBuf::from(&record.destination).join(&record.filename);
+
+    // Seed bandwidth Arc from the persisted value so the saved limit applies immediately.
+    bandwidth.store(record.bandwidth_limit_kbps as u32, Ordering::Relaxed);
 
     // Mark as downloading again.
     if let Some(db) = app.try_state::<DbState>() {
@@ -119,6 +165,7 @@ pub async fn download_file_resume(
         &app,
         token,
         snapshots,
+        bandwidth,
     )
     .await;
     handle_outcome(outcome, intent, id, &file_path, &url, &filename, &app).await;
@@ -186,6 +233,7 @@ async fn handle_outcome(
                 shield::FinalVerdict::Clean => {
                     let status_ok = if let Some(db) = app.try_state::<DbState>() {
                         let conn = db.0.lock().unwrap_or_else(|p| p.into_inner());
+                        db::reset_retry_count(&conn, id).ok();
                         let ok = db::update_download_status(&conn, id, "complete").is_ok();
                         db::delete_chunk_snapshots(&conn, id).ok();
                         ok
@@ -310,6 +358,8 @@ async fn handle_outcome(
                 let conn = db.0.lock().unwrap_or_else(|p| p.into_inner());
                 db::delete_chunk_snapshots(&conn, id).ok();
                 db::update_download_status(&conn, id, "failed").ok();
+                // Reset counter so history tab shows 0, not the exhausted attempt count.
+                db::reset_retry_count(&conn, id).ok();
             }
             app.emit_all(
                 &format!("download://error/{id}"),
@@ -329,6 +379,7 @@ async fn handle_outcome(
 ///   id:          The downloads table row id.
 ///   app:         Tauri app handle.
 ///   token:       CancellationToken for pause/cancel.
+///   bandwidth:   Bandwidth limit in kbps (0 = unlimited).
 ///
 /// Returns:
 ///   Ok(LifecycleOutcome) on clean finish or pause. Err(message) on failure.
@@ -339,6 +390,7 @@ async fn run_download(
     id: i64,
     app: &tauri::AppHandle,
     token: CancellationToken,
+    bandwidth: Arc<AtomicU32>,
 ) -> Result<chunked::LifecycleOutcome, String> {
     let dest_path = PathBuf::from(destination);
     std::fs::create_dir_all(&dest_path).map_err(|e| e.to_string())?;
@@ -412,6 +464,7 @@ async fn run_download(
             token,
             None,
             max_chunks,
+            bandwidth,
         )
         .await
     } else {
@@ -429,9 +482,11 @@ async fn run_download(
 ///   app:         Tauri app handle.
 ///   token:       Fresh CancellationToken.
 ///   snapshots:   Per-chunk byte-offset snapshots from the paused session.
+///   bandwidth:   Bandwidth limit in kbps (0 = unlimited).
 ///
 /// Returns:
 ///   Ok(LifecycleOutcome) on clean finish or pause. Err(message) on failure.
+#[allow(clippy::too_many_arguments)]
 async fn run_download_resume(
     url: &str,
     destination: &str,
@@ -440,6 +495,7 @@ async fn run_download_resume(
     app: &tauri::AppHandle,
     token: CancellationToken,
     snapshots: Vec<crate::db::ChunkSnapshot>,
+    bandwidth: Arc<AtomicU32>,
 ) -> Result<chunked::LifecycleOutcome, String> {
     let dest_path = PathBuf::from(destination);
     let file_path = dest_path.join(filename);
@@ -451,7 +507,7 @@ async fn run_download_resume(
 
     if snapshots.is_empty() {
         // No chunk snapshots — fall back to a full fresh download.
-        return run_download(url, destination, filename, id, app, token).await;
+        return run_download(url, destination, filename, id, app, token, bandwidth).await;
     }
 
     // Determine total_size from the last snapshot's end_byte.
@@ -462,7 +518,7 @@ async fn run_download_resume(
         .unwrap_or(0);
 
     if total_size == 0 {
-        return run_download(url, destination, filename, id, app, token).await;
+        return run_download(url, destination, filename, id, app, token, bandwidth).await;
     }
 
     // Use a placeholder probe response: send a Range request for byte 0-0 as the "probe".
@@ -501,6 +557,7 @@ async fn run_download_resume(
         token,
         Some(snapshots),
         max_chunks,
+        bandwidth,
     )
     .await
 }

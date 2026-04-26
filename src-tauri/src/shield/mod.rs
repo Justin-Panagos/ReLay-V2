@@ -26,23 +26,25 @@ pub struct ScanContext {
 }
 
 /// Verdict returned by a single scan layer.
-#[allow(dead_code)]
 pub enum LayerVerdict {
     /// File passed this layer with no concerns.
     Clean,
     /// File has suspicious characteristics but is not definitively malicious.
-    Suspicious { reason: String },
+    Suspicious {
+        #[allow(dead_code)]
+        reason: String,
+    },
     /// File is a confirmed threat and should be quarantined immediately.
     Threat { reason: String },
 }
 
 /// Result produced by a single layer.
-/// Fields are kept for future logging and UI display even if not all are read now.
-#[allow(dead_code)]
 pub struct LayerResult {
     /// Layer number (1–6).
+    #[allow(dead_code)]
     pub layer: u8,
     /// Human-readable layer name.
+    #[allow(dead_code)]
     pub name: &'static str,
     /// The layer's verdict.
     pub verdict: LayerVerdict,
@@ -60,12 +62,11 @@ pub enum FinalVerdict {
 }
 
 /// Full pipeline result returned by `run_pipeline`.
-/// `layers` is kept for future per-layer reporting in the UI.
-#[allow(dead_code)]
 pub struct PipelineResult {
     /// Hex-encoded SHA-256 of the scanned file.
     pub sha256: String,
     /// Per-layer results (may be fewer than 6 if an early Threat was found).
+    #[allow(dead_code)]
     pub layers: Vec<LayerResult>,
     /// Overall verdict.
     pub verdict: FinalVerdict,
@@ -145,13 +146,9 @@ pub async fn run_pipeline(
             )
             .ok();
             let result = $fut.await;
-            let is_threat = matches!(result.verdict, LayerVerdict::Threat { .. });
-            layers.push(result);
-            if is_threat {
-                let reason = match &layers.last().unwrap().verdict {
-                    LayerVerdict::Threat { reason } => reason.clone(),
-                    _ => unreachable!(),
-                };
+            if let LayerVerdict::Threat { ref reason } = result.verdict {
+                let reason = reason.clone();
+                layers.push(result);
                 return PipelineResult {
                     sha256: ctx.sha256.clone(),
                     layers,
@@ -159,6 +156,7 @@ pub async fn run_pipeline(
                     sandbox_report: None,
                 };
             }
+            layers.push(result);
         }};
     }
 

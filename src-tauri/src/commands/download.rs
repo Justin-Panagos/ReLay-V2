@@ -51,10 +51,10 @@ pub async fn start_download(
     // to prevent a TOCTOU race where two concurrent commands both see an empty
     // registry and each spawn a download, violating the free-tier 1-active limit.
     let lifecycle = app.state::<lifecycle::LifecycleState>();
-    if let Some((token, intent)) = lifecycle::try_register_if_empty(&lifecycle, id) {
+    if let Some((token, intent, bandwidth)) = lifecycle::try_register_if_empty(&lifecycle, id) {
         let app2 = app.clone();
         tokio::spawn(download::download_file(
-            url, destination, filename, id, app2, token, intent,
+            url, destination, filename, id, app2, token, intent, bandwidth,
         ));
     } else {
         let queue = app.state::<lifecycle::QueueState>();
@@ -227,9 +227,92 @@ pub async fn resume_download(
         }
     }
 
-    let (token, intent) = lifecycle::register_download(&lifecycle, id);
-    tokio::spawn(download::download_file_resume(id, app, token, intent));
+    let (token, intent, bandwidth) = lifecycle::register_download(&lifecycle, id);
+    tokio::spawn(download::download_file_resume(id, app, token, intent, bandwidth));
 
+    Ok(())
+}
+
+/// Reorders the pending download queue to match the given ordered list of IDs.
+/// Only IDs currently in the queue are affected; unknown IDs are silently ignored.
+/// Pro-only: the frontend enforces this — the backend applies the reorder unconditionally.
+///
+/// Args:
+///   ordered_ids: Download IDs in the desired queue order (front = next to start).
+///   queue:       Tauri-managed queue state.
+///
+/// Returns:
+///   Ok(()) always.
+#[tauri::command]
+pub fn reorder_queue(
+    ordered_ids: Vec<i64>,
+    queue: State<'_, lifecycle::QueueState>,
+) -> Result<(), String> {
+    let mut q = queue.0.lock().unwrap_or_else(|p| p.into_inner());
+    let current: std::collections::HashSet<i64> = q.iter().copied().collect();
+    *q = ordered_ids
+        .into_iter()
+        .filter(|id| current.contains(id))
+        .collect();
+    Ok(())
+}
+
+/// Stores an optional time-window schedule for a download.
+/// When set, the schedule watchdog will auto-pause/resume the download based on local time.
+/// Start and end are "HH:MM" strings in 24-hour format; pass null to clear the schedule.
+///
+/// Args:
+///   id:    The download row id.
+///   start: Schedule window start as "HH:MM", or None to clear.
+///   end:   Schedule window end as "HH:MM", or None to clear.
+///   db:    Tauri-managed database state.
+///
+/// Returns:
+///   Ok(()) on success, Err on DB write failure.
+#[tauri::command]
+pub fn set_download_schedule(
+    id: i64,
+    start: Option<String>,
+    end: Option<String>,
+    db: State<'_, DbState>,
+) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    db::set_download_schedule(&conn, id, start.as_deref(), end.as_deref())
+        .map_err(|e| e.to_string())
+}
+
+/// Sets the bandwidth limit for an active or queued download.
+/// If the download is currently active, updates the in-flight `AtomicU32` so the
+/// throttle takes effect on the next written chunk without interrupting the download.
+/// Also persists the new limit to the database so it survives a pause/resume cycle.
+///
+/// Args:
+///   id:        The download row id.
+///   kbps:      Bandwidth limit in kilobits per second (0 = unlimited).
+///   db:        Tauri-managed database state.
+///   lifecycle: Tauri-managed lifecycle state.
+///
+/// Returns:
+///   Ok(()) on success. Err on DB write failure.
+#[tauri::command]
+pub fn set_download_bandwidth(
+    id: i64,
+    kbps: u32,
+    db: State<'_, DbState>,
+    lifecycle: State<'_, lifecycle::LifecycleState>,
+) -> Result<(), String> {
+    // Update persisted limit so resume picks it up.
+    {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        db::update_bandwidth_limit(&conn, id, kbps).map_err(|e| e.to_string())?;
+    }
+    // If download is active, update the live atomic immediately.
+    {
+        let guard = lifecycle.0.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(handle) = guard.get(&id) {
+            handle.bandwidth.store(kbps, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
     Ok(())
 }
 

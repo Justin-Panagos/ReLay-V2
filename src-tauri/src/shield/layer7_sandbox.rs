@@ -222,16 +222,262 @@ fn is_executable(path: &std::path::Path) -> bool {
     false
 }
 
-/// Stub for non-macOS platforms — sandbox scanning requires sandbox-exec (macOS only).
-/// Returns a Suspicious verdict with an "unsupported" note so the scan log shows the
-/// layer was skipped rather than silently passing, which would be a false Clean signal.
+// ── Linux sandbox (unshare-based network namespace isolation) ─────────────────
+
+/// Layer 7: Linux sandbox via `unshare`.
+/// Spawns the file inside a new network + user namespace using the `unshare` utility.
+/// The child process has no network access; it cannot escalate privileges.
+/// Non-executables skip the sandbox and return Clean immediately.
 ///
 /// Args:
-///   _ctx: Scan context (unused on non-macOS).
+///   ctx: Scan context (path is used).
+///
+/// Returns:
+///   A tuple of (LayerResult, Option<SandboxReport>).
+#[cfg(target_os = "linux")]
+pub async fn scan(ctx: &ScanContext) -> (LayerResult, Option<SandboxReport>) {
+    use std::time::Duration;
+
+    if !is_executable(&ctx.path) {
+        return (
+            LayerResult { layer: 7, name: "Sandbox", verdict: LayerVerdict::Clean },
+            None,
+        );
+    }
+
+    let path_str = ctx.path.to_string_lossy().to_string();
+
+    // unshare --net creates a fresh network namespace with no interfaces.
+    // --user creates a new user namespace (prevents privilege escalation).
+    // --fork + --pid create a PID namespace so the process can't signal peers.
+    let mut child = match tokio::process::Command::new("unshare")
+        .args(["--net", "--user", "--fork", "--pid", "--", &path_str])
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[shield] unshare spawn failed: {e}");
+            return (
+                LayerResult {
+                    layer: 7,
+                    name: "Sandbox",
+                    verdict: LayerVerdict::Suspicious {
+                        reason: format!("unshare unavailable: {e}"),
+                    },
+                },
+                None,
+            );
+        }
+    };
+
+    // Capture exit status from the first wait; reap after kill on timeout.
+    // Never call child.wait() twice — the OS reaps the process on the first call.
+    let exit_status = match tokio::time::timeout(Duration::from_secs(45), child.wait()).await {
+        Ok(status) => Some(status.ok().map(|s| s.success()).unwrap_or(false)),
+        Err(_) => {
+            child.kill().await.ok();
+            // Reap the killed process to avoid a zombie, then return None (timed out).
+            child.wait().await.ok();
+            None
+        }
+    };
+
+    let (verdict_str, notes) = match exit_status {
+        None => (
+            "suspicious".to_string(),
+            "Process still running after 45 s inside Linux namespace sandbox".to_string(),
+        ),
+        Some(true) => (
+            "clean".to_string(),
+            "Network isolated via Linux user+net+pid namespace (unshare)".to_string(),
+        ),
+        Some(false) => (
+            "suspicious".to_string(),
+            "Process exited with error inside Linux namespace sandbox".to_string(),
+        ),
+    };
+
+    let layer_verdict = if verdict_str == "suspicious" {
+        LayerVerdict::Suspicious { reason: notes.clone() }
+    } else {
+        LayerVerdict::Clean
+    };
+
+    let report = SandboxReport {
+        syscalls_blocked: 0,    // namespace isolation; syscall counts require strace/seccomp
+        network_attempts: 0,    // network blocked at namespace level, attempts not countable
+        file_writes: 0,
+        verdict: verdict_str,
+        platform: "linux".to_string(),
+        notes,
+    };
+
+    (
+        LayerResult { layer: 7, name: "Sandbox", verdict: layer_verdict },
+        Some(report),
+    )
+}
+
+// ── Windows sandbox (Job Object isolation) ───────────────────────────────────
+
+/// Layer 7: Windows sandbox via Win32 Job Objects.
+/// Spawns the file under a Job Object with kill-on-close and unhandled-exception
+/// termination limits. Waits up to 45 s for completion.
+/// Non-executables skip the sandbox and return Clean immediately.
+///
+/// Args:
+///   ctx: Scan context (path is used).
+///
+/// Returns:
+///   A tuple of (LayerResult, Option<SandboxReport>).
+#[cfg(target_os = "windows")]
+pub async fn scan(ctx: &ScanContext) -> (LayerResult, Option<SandboxReport>) {
+    use std::time::Duration;
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, WAIT_FAILED, WAIT_TIMEOUT};
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
+    };
+
+    if !is_executable(&ctx.path) {
+        return (
+            LayerResult { layer: 7, name: "Sandbox", verdict: LayerVerdict::Clean },
+            None,
+        );
+    }
+
+    let path_str = ctx.path.to_string_lossy().to_string();
+
+    // Spawn the target process first so we have a PID to open a handle on.
+    let mut child = match tokio::process::Command::new(&path_str).spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                LayerResult {
+                    layer: 7,
+                    name: "Sandbox",
+                    verdict: LayerVerdict::Suspicious {
+                        reason: format!("spawn failed: {e}"),
+                    },
+                },
+                None,
+            );
+        }
+    };
+
+    let pid = match child.id() {
+        Some(p) => p,
+        None => {
+            // Process exited before we could get the PID.
+            return (
+                LayerResult { layer: 7, name: "Sandbox", verdict: LayerVerdict::Clean },
+                Some(SandboxReport {
+                    syscalls_blocked: 0,
+                    network_attempts: 0,
+                    file_writes: 0,
+                    verdict: "clean".to_string(),
+                    platform: "windows".to_string(),
+                    notes: "Process exited immediately".to_string(),
+                }),
+            );
+        }
+    };
+
+    let (verdict_str, notes) = unsafe {
+        // Open a handle to the spawned process.
+        let proc: HANDLE = OpenProcess(PROCESS_SYNCHRONIZE | PROCESS_TERMINATE, 0, pid);
+        if proc == 0 {
+            ("suspicious".to_string(), "OpenProcess failed — sandbox isolation not applied".to_string())
+        } else {
+            // Create a Job Object with kill-on-close semantics.
+            let job: HANDLE = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            if job != 0 {
+                let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
+                    BasicLimitInformation: std::mem::zeroed(),
+                    IoInfo: std::mem::zeroed(),
+                    ProcessMemoryLimit: 0,
+                    JobMemoryLimit: 0,
+                    PeakProcessMemoryUsed: 0,
+                    PeakJobMemoryUsed: 0,
+                };
+                limits.BasicLimitInformation.LimitFlags =
+                    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+                    | JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION;
+
+                SetInformationJobObject(
+                    job,
+                    JobObjectExtendedLimitInformation,
+                    &limits as *const _ as *const _,
+                    std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                );
+                AssignProcessToJobObject(job, proc);
+            }
+
+            // Wait up to 45 s.
+            let wait = WaitForSingleObject(proc, 45_000);
+            let timed_out = wait == WAIT_TIMEOUT;
+            let wait_failed = wait == WAIT_FAILED;
+
+            if timed_out {
+                child.kill().await.ok();
+            }
+
+            if job != 0 {
+                CloseHandle(job);
+            }
+            CloseHandle(proc);
+
+            if timed_out {
+                ("suspicious".to_string(), "Process still running after 45 s in Job Object sandbox".to_string())
+            } else if wait_failed {
+                ("suspicious".to_string(), "WaitForSingleObject failed — sandbox result uncertain".to_string())
+            } else {
+                let exit_ok = child.wait().await.ok().map(|s| s.success()).unwrap_or(false);
+                if exit_ok {
+                    ("clean".to_string(), "Process completed normally under Job Object sandbox".to_string())
+                } else {
+                    ("suspicious".to_string(), "Process exited with error under Job Object sandbox".to_string())
+                }
+            }
+        }
+    };
+
+    let layer_verdict = if verdict_str == "suspicious" {
+        LayerVerdict::Suspicious { reason: notes.clone() }
+    } else {
+        LayerVerdict::Clean
+    };
+
+    let report = SandboxReport {
+        syscalls_blocked: 0,
+        network_attempts: 0,
+        file_writes: 0,
+        verdict: verdict_str,
+        platform: "windows".to_string(),
+        notes,
+    };
+
+    (
+        LayerResult { layer: 7, name: "Sandbox", verdict: layer_verdict },
+        Some(report),
+    )
+}
+
+// ── Fallback stub for unsupported platforms ───────────────────────────────────
+
+/// Stub for platforms with no sandbox implementation.
+/// Returns Suspicious so the UI shows the layer was skipped rather than silently passing.
+///
+/// Args:
+///   _ctx: Scan context (unused).
 ///
 /// Returns:
 ///   (LayerResult with Suspicious verdict, Some(SandboxReport with platform="unsupported")).
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 pub async fn scan(_ctx: &ScanContext) -> (LayerResult, Option<SandboxReport>) {
     let report = SandboxReport {
         syscalls_blocked: 0,
@@ -239,14 +485,14 @@ pub async fn scan(_ctx: &ScanContext) -> (LayerResult, Option<SandboxReport>) {
         file_writes: 0,
         verdict: "unsupported".to_string(),
         platform: "unsupported".to_string(),
-        notes: "Sandbox scanning requires macOS sandbox-exec — skipped on this platform.".to_string(),
+        notes: "Sandbox scanning is not available on this platform.".to_string(),
     };
     (
         LayerResult {
             layer: 7,
             name: "Sandbox",
             verdict: LayerVerdict::Suspicious {
-                reason: "Sandbox layer skipped (non-macOS platform)".to_string(),
+                reason: "Sandbox layer skipped (unsupported platform)".to_string(),
             },
         },
         Some(report),

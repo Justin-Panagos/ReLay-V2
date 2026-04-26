@@ -31,12 +31,30 @@ fn main() {
 
     tauri::Builder::default()
         .setup(|app| {
-            let dir = app
-                .path_resolver()
-                .app_data_dir()
-                .expect("could not resolve app data dir");
+            let dir = match app.path_resolver().app_data_dir() {
+                Some(d) => d,
+                None => {
+                    tauri::api::dialog::blocking::message(
+                        None::<&tauri::Window>,
+                        "Startup Error",
+                        "Could not resolve the app data directory.",
+                    );
+                    return Err("app data dir unavailable".into());
+                }
+            };
 
-            let conn = db::init_db(dir.clone()).expect("failed to initialise database");
+            let conn = match db::init_db(dir.clone()) {
+                Ok(c) => c,
+                Err(msg) => {
+                    tauri::api::dialog::blocking::message(
+                        None::<&tauri::Window>,
+                        "Database Error",
+                        msg,
+                    );
+                    std::process::exit(1);
+                }
+            };
+
             let icp_config = match icp::config::load_config(&dir) {
                 Ok(cfg) => cfg,
                 Err(msg) => {
@@ -62,7 +80,7 @@ fn main() {
             // router maps an inbound port, allowing peers to dial in directly.
             // defer_writes_up_to buffers piece writes in memory (32 MB) so disk I/O
             // does not bottleneck fast connections.
-            let torrent_session = tauri::async_runtime::block_on(
+            let torrent_session = match tauri::async_runtime::block_on(
                 librqbit::Session::new_with_opts(
                     torrent_output,
                     librqbit::SessionOptions {
@@ -72,8 +90,17 @@ fn main() {
                         ..Default::default()
                     },
                 ),
-            )
-            .expect("failed to initialise torrent session");
+            ) {
+                Ok(s) => s,
+                Err(e) => {
+                    tauri::api::dialog::blocking::message(
+                        None::<&tauri::Window>,
+                        "Startup Error",
+                        format!("Failed to initialise torrent session: {e}"),
+                    );
+                    return Err(e.into());
+                }
+            };
 
             // Seed the licence cache from the last persisted ICP-verified value.
             // The cache is marked stale (86401s ago) so run_startup() always triggers
@@ -93,7 +120,7 @@ fn main() {
                 reqwest::Client::builder()
                     .connect_timeout(std::time::Duration::from_secs(10))
                     .build()
-                    .expect("failed to build HTTP client"),
+                    .unwrap_or_else(|_| reqwest::Client::new()),
             );
             app.manage(LicenceCacheState(Mutex::new(LicenceCache {
                 status: seed_status,
@@ -118,6 +145,12 @@ fn main() {
             let config_for_startup = icp_config.clone();
             tauri::async_runtime::spawn(async move {
                 icp::sync::run_startup(app_handle, config_for_startup).await;
+            });
+
+            // Spawn the schedule watchdog: auto-pause/resume downloads at their window boundaries.
+            let app_handle_sched = app.handle();
+            tauri::async_runtime::spawn(async move {
+                download::lifecycle::schedule_watchdog(app_handle_sched).await;
             });
 
             Ok(())
@@ -159,6 +192,9 @@ fn main() {
             commands::developer::download_threat_export,
             commands::download::pick_folder,
             commands::download::log_error,
+            commands::download::reorder_queue,
+            commands::download::set_download_schedule,
+            commands::download::set_download_bandwidth,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ReLay");

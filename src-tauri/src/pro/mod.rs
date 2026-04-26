@@ -55,6 +55,9 @@ pub fn is_pro(cache: &LicenceCacheState) -> bool {
 }
 
 /// Returns Ok(()) if the in-memory licence cache indicates active Pro, Err otherwise.
+/// Intended call site for all Pro feature gates in commands/ (CLAUDE.md convention).
+/// Currently commands call is_pro() directly; this function is preserved so future
+/// Pro-gated commands have a single consistent entry point.
 ///
 /// Args:
 ///   cache: The managed `LicenceCacheState`.

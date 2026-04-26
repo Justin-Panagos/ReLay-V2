@@ -17,6 +17,11 @@ import {
   setCardResuming,
   setCardScanning,
   setCardQuarantined,
+  setCardRetrying,
+  clearRetryBadge,
+  enableCardDrag,
+  addScheduleInputs,
+  addBandwidthSlider,
 } from './downloads.js'
 import { loadHistory } from './history.js'
 import {
@@ -48,6 +53,9 @@ const PAUSED_LOAD_LIMIT = 200
 /** Set of download IDs currently active (downloading or queued) in this session. */
 const activeDownloads = new Set()
 
+/** True if the current licence is Pro. Set once at startup. */
+let proEnabled = false
+
 /** Holds the unlisten function for the icp://status event. Stored at module scope
  *  so it can be called if init() is ever re-invoked, preventing duplicate listeners. */
 let icpStatusUnlisten = () => {}
@@ -59,10 +67,70 @@ let icpStatusUnlisten = () => {}
  * and any downloads that were paused when the app was last closed.
  * reset_stale_downloads is non-fatal — app continues even if it fails.
  */
+/**
+ * Wires drag-and-drop reorder on the downloads list for Pro users.
+ * Uses event delegation on #downloads-list so dynamically added cards are covered.
+ */
+function initQueueDragDrop() {
+  const list = document.getElementById('downloads-list')
+  if (!list) return
+
+  let draggedId = null
+
+  list.addEventListener('dragstart', (e) => {
+    const card = e.target.closest('.download-card[draggable]')
+    if (!card) return
+    draggedId = Number(card.dataset.id)
+    card.classList.add('card-dragging')
+  })
+
+  list.addEventListener('dragend', () => {
+    document.querySelectorAll('.card-dragging').forEach(c => c.classList.remove('card-dragging'))
+    document.querySelectorAll('.card-drag-over').forEach(c => c.classList.remove('card-drag-over'))
+    draggedId = null
+  })
+
+  list.addEventListener('dragover', (e) => {
+    e.preventDefault()
+    const card = e.target.closest('.download-card')
+    if (!card || Number(card.dataset.id) === draggedId) return
+    document.querySelectorAll('.card-drag-over').forEach(c => c.classList.remove('card-drag-over'))
+    card.classList.add('card-drag-over')
+  })
+
+  list.addEventListener('dragleave', (e) => {
+    if (!e.currentTarget.contains(e.relatedTarget)) {
+      document.querySelectorAll('.card-drag-over').forEach(c => c.classList.remove('card-drag-over'))
+    }
+  })
+
+  list.addEventListener('drop', async (e) => {
+    e.preventDefault()
+    document.querySelectorAll('.card-drag-over').forEach(c => c.classList.remove('card-drag-over'))
+    const targetCard = e.target.closest('.download-card')
+    if (!targetCard || draggedId == null) return
+    const targetId = Number(targetCard.dataset.id)
+    if (targetId === draggedId) return
+
+    const draggedCard = document.querySelector(`.download-card[data-id="${draggedId}"]`)
+    if (!draggedCard) return
+    list.insertBefore(draggedCard, targetCard)
+
+    const orderedIds = [...list.querySelectorAll('.download-card')].map(c => Number(c.dataset.id))
+    await invoke('reorder_queue', { orderedIds }).catch(() => {})
+  })
+}
+
 async function init() {
   try {
     await invoke('reset_stale_downloads')
   } catch { /* non-fatal */ }
+
+  // Determine Pro status once at startup — used to gate drag-and-drop and schedule inputs.
+  try {
+    const status = await invoke('get_pro_status')
+    proEnabled = status.status === 'pro'
+  } catch { proEnabled = false }
 
   // Wire the ICP offline banner.
   const banner    = document.getElementById('icp-banner')
@@ -83,6 +151,8 @@ async function init() {
       }
     })
   } catch { /* non-fatal if event system not ready */ }
+
+  if (proEnabled) initQueueDragDrop()
 
   initTorrentDrop()
   initCommunity()
@@ -110,6 +180,7 @@ async function subscribeToDownloadEvents(id) {
   let unlistenPaused     = () => {}
   let unlistenScan       = () => {}
   let unlistenQuarantine = () => {}
+  let unlistenRetry      = () => {}
 
   /** Removes all event listeners for this download. */
   function cleanup() {
@@ -119,6 +190,7 @@ async function subscribeToDownloadEvents(id) {
     unlistenPaused()
     unlistenScan()
     unlistenQuarantine()
+    unlistenRetry()
   }
 
   try {
@@ -127,6 +199,7 @@ async function subscribeToDownloadEvents(id) {
     })
 
     unlistenComplete = await listen(`download://complete/${id}`, async (e) => {
+      clearRetryBadge(id)
       setCardComplete(id, e.payload.path)
       activeDownloads.delete(id)
       cleanup()
@@ -134,6 +207,7 @@ async function subscribeToDownloadEvents(id) {
     })
 
     unlistenError = await listen(`download://error/${id}`, async (e) => {
+      clearRetryBadge(id)
       setCardError(id, e.payload.message)
       activeDownloads.delete(id)
       cleanup()
@@ -148,6 +222,10 @@ async function subscribeToDownloadEvents(id) {
 
     unlistenScan = await listen(`download://scan/${id}`, () => {
       setCardScanning(id)
+    })
+
+    unlistenRetry = await listen(`download://retry/${id}`, (e) => {
+      setCardRetrying(id, e.payload.attempt)
     })
 
     unlistenQuarantine = await listen(`download://quarantine/${id}`, async (e) => {
@@ -205,6 +283,7 @@ async function startDownload(url) {
 
   activeDownloads.add(id)
   addDownloadCard(id, filename, url, destination, { onResume: resumeDownload })
+  if (proEnabled) { enableCardDrag(id); addScheduleInputs(id); addBandwidthSlider(id) }
   await subscribeToDownloadEvents(id)
 }
 
@@ -278,6 +357,11 @@ async function loadPausedDownloads() {
       isPaused: true,
       onResume: resumeDownload,
     })
+    if (proEnabled) {
+      enableCardDrag(r.id)
+      addScheduleInputs(r.id, r.schedule_start ?? '', r.schedule_end ?? '')
+      addBandwidthSlider(r.id, r.bandwidth_limit_kbps ?? 0)
+    }
     await subscribeToDownloadEvents(r.id)
   }
 }

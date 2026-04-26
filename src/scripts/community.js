@@ -8,11 +8,34 @@ import { escHtml } from './utils.js'
 import { showErrorToast } from './toast.js'
 
 /**
+ * Hides the Community panel tab and its pane from the UI.
+ * Called when the current licence is not Pro.
+ */
+function hideCommunityTab() {
+  document.querySelector('.panel-tab[data-panel-tab="community"]')
+    ?.classList.add('hidden')
+  document.getElementById('panel-community')?.classList.add('hidden')
+}
+
+/**
  * Wires the refresh button and the tab-switch listener so proposals reload
  * whenever the Community tab is activated. Called once during app init.
- * Does not perform any network calls itself.
+ * Hides the tab entirely and returns early for Free users.
  */
-export function initCommunity() {
+export async function initCommunity() {
+  let proStatus
+  try {
+    proStatus = await invoke('get_pro_status')
+  } catch {
+    hideCommunityTab()
+    return
+  }
+
+  if (proStatus.status !== 'pro') {
+    hideCommunityTab()
+    return
+  }
+
   document.getElementById('community-refresh-btn')
     ?.addEventListener('click', () => loadCommunity())
 
@@ -23,8 +46,17 @@ export function initCommunity() {
 /**
  * Fetches proposals and reputation from the ICP canisters (via Tauri commands)
  * and renders both. Safe to call multiple times — clears the list each time.
+ * No-ops silently for Free users (tab is hidden).
  */
 export async function loadCommunity() {
+  let proStatus
+  try {
+    proStatus = await invoke('get_pro_status')
+  } catch {
+    return
+  }
+  if (proStatus.status !== 'pro') return
+
   await Promise.all([renderProposals(), loadReputation()])
 }
 

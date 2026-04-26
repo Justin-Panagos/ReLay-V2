@@ -5,7 +5,7 @@
 
 use crate::db::ChunkSnapshot;
 use std::io::{BufWriter, Seek, SeekFrom, Write};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::Manager;
@@ -57,6 +57,7 @@ pub enum LifecycleOutcome {
 ///   token:          CancellationToken — fire to pause or cancel this download.
 ///   resume_offsets: Optional per-chunk snapshots from a previous paused session.
 ///   max_chunks:     Upper bound on chunk count — pass FREE_TIER_CHUNKS or PRO_TIER_CHUNKS.
+///   bandwidth:      Bandwidth limit in kbps shared across all chunks (0 = unlimited).
 ///
 /// Returns:
 ///   Ok(LifecycleOutcome) on clean finish or pause. Err(message) if any chunk errors.
@@ -72,6 +73,7 @@ pub async fn download_chunked(
     token: CancellationToken,
     resume_offsets: Option<Vec<ChunkSnapshot>>,
     max_chunks: usize,
+    bandwidth: Arc<AtomicU32>,
 ) -> Result<LifecycleOutcome, String> {
     let chunk_count =
         ((total_size / MIN_CHUNK_BYTES) as usize).clamp(1, max_chunks);
@@ -184,6 +186,8 @@ pub async fn download_chunked(
             Arc::clone(&total_downloaded),
             Arc::clone(&per_chunk_written[0]),
             token.clone(),
+            Arc::clone(&bandwidth),
+            chunk_count,
         ));
     } else {
         // Chunk 0 already fully written — drop the probe response.
@@ -214,6 +218,8 @@ pub async fn download_chunked(
                 Arc::clone(&total_downloaded),
                 Arc::clone(&per_chunk_written[i]),
                 token.clone(),
+                Arc::clone(&bandwidth),
+                chunk_count,
             ));
         }
     }
@@ -290,9 +296,12 @@ pub async fn download_chunked(
 ///   total_dl:      Shared global byte counter — incremented on each write.
 ///   per_chunk_dl:  Per-chunk byte counter — incremented on each write.
 ///   token:         CancellationToken — pause/cancel signal.
+///   bandwidth:     Shared bandwidth limit in kbps (0 = unlimited).
+///   chunk_count:   Total number of active chunks — used to compute per-chunk budget.
 ///
 /// Returns:
 ///   Ok(ChunkStatus) on success or pause. Err(message) on any I/O or network error.
+#[allow(clippy::too_many_arguments)]
 async fn download_chunk_from_stream(
     mut response: reqwest::Response,
     path: std::path::PathBuf,
@@ -301,6 +310,8 @@ async fn download_chunk_from_stream(
     total_dl: Arc<AtomicU64>,
     per_chunk_dl: Arc<AtomicU64>,
     token: CancellationToken,
+    bandwidth: Arc<AtomicU32>,
+    chunk_count: usize,
 ) -> Result<ChunkStatus, String> {
     let file = std::fs::OpenOptions::new()
         .write(true)
@@ -312,6 +323,9 @@ async fn download_chunk_from_stream(
     })?;
 
     let mut remaining = bytes_to_read;
+    let mut chunk_bytes_this_window: u64 = 0;
+    let mut window_start = Instant::now();
+
     while remaining > 0 {
         let maybe_chunk = tokio::select! {
             result = response.chunk() => result.map_err(|e| e.to_string())?,
@@ -333,6 +347,32 @@ async fn download_chunk_from_stream(
         total_dl.fetch_add(written, Ordering::Relaxed);
         per_chunk_dl.fetch_add(written, Ordering::Relaxed);
         remaining -= written;
+
+        // Throttle: compute per-chunk budget and sleep if ahead.
+        let kbps = bandwidth.load(Ordering::Relaxed);
+        if kbps > 0 {
+            chunk_bytes_this_window += written;
+            let budget_bps = (kbps as u64 * 1024) / chunk_count.max(1) as u64;
+            let elapsed = window_start.elapsed().as_secs_f64();
+            let expected_secs = chunk_bytes_this_window as f64 / budget_bps as f64;
+            if expected_secs > elapsed {
+                let sleep_ms = ((expected_secs - elapsed) * 1000.0) as u64;
+                if sleep_ms > 0 {
+                    tokio::select! {
+                        _ = tokio::time::sleep(Duration::from_millis(sleep_ms)) => {}
+                        _ = token.cancelled() => {
+                            tokio::task::block_in_place(|| writer.flush().ok());
+                            return Ok(ChunkStatus::Paused);
+                        }
+                    }
+                }
+            }
+            // Reset window every second to keep floating-point error bounded.
+            if window_start.elapsed().as_secs_f64() >= 1.0 {
+                chunk_bytes_this_window = 0;
+                window_start = Instant::now();
+            }
+        }
     }
 
     tokio::task::block_in_place(|| writer.flush().map_err(|e| e.to_string()))?;
@@ -352,6 +392,8 @@ async fn download_chunk_from_stream(
 ///   total_dl:     Shared global byte counter — incremented on each write.
 ///   per_chunk_dl: Per-chunk byte counter — incremented on each write.
 ///   token:        CancellationToken — pause/cancel signal.
+///   bandwidth:    Shared bandwidth limit in kbps (0 = unlimited).
+///   chunk_count:  Total number of active chunks — used to compute per-chunk budget.
 ///
 /// Returns:
 ///   Ok(ChunkStatus) on success or pause. Err(message) on any HTTP or I/O error.
@@ -365,6 +407,8 @@ async fn download_chunk(
     total_dl: Arc<AtomicU64>,
     per_chunk_dl: Arc<AtomicU64>,
     token: CancellationToken,
+    bandwidth: Arc<AtomicU32>,
+    chunk_count: usize,
 ) -> Result<ChunkStatus, String> {
     let response = client
         .get(&url)
@@ -388,6 +432,9 @@ async fn download_chunk(
     })?;
 
     let mut response = response;
+    let mut chunk_bytes_this_window: u64 = 0;
+    let mut window_start = Instant::now();
+
     loop {
         let maybe_chunk = tokio::select! {
             result = response.chunk() => result.map_err(|e| e.to_string())?,
@@ -407,6 +454,31 @@ async fn download_chunk(
         })?;
         total_dl.fetch_add(len, Ordering::Relaxed);
         per_chunk_dl.fetch_add(len, Ordering::Relaxed);
+
+        // Throttle: compute per-chunk budget and sleep if ahead.
+        let kbps = bandwidth.load(Ordering::Relaxed);
+        if kbps > 0 {
+            chunk_bytes_this_window += len;
+            let budget_bps = (kbps as u64 * 1024) / chunk_count.max(1) as u64;
+            let elapsed = window_start.elapsed().as_secs_f64();
+            let expected_secs = chunk_bytes_this_window as f64 / budget_bps as f64;
+            if expected_secs > elapsed {
+                let sleep_ms = ((expected_secs - elapsed) * 1000.0) as u64;
+                if sleep_ms > 0 {
+                    tokio::select! {
+                        _ = tokio::time::sleep(Duration::from_millis(sleep_ms)) => {}
+                        _ = token.cancelled() => {
+                            tokio::task::block_in_place(|| writer.flush().ok());
+                            return Ok(ChunkStatus::Paused);
+                        }
+                    }
+                }
+            }
+            if window_start.elapsed().as_secs_f64() >= 1.0 {
+                chunk_bytes_this_window = 0;
+                window_start = Instant::now();
+            }
+        }
     }
 
     tokio::task::block_in_place(|| writer.flush().map_err(|e| e.to_string()))?;
