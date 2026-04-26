@@ -1,8 +1,0 @@
-name = "relay-worker"
-main = "index.js"
-compatibility_date = "2024-01-01"
-
-[[kv_namespaces]]
-binding = "RELAY_LICENCES"
-id = "53152d04f47e438daf950a2c4bad0ec1"
-preview_id = "59449b45351c4fbbb631b8f59aa15290"

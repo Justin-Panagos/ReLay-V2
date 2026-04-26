@@ -68,13 +68,12 @@ eicar*
 .cache/
 
 # Private / internal docs — not useful to contributors
-relay_investor_pitch.md
-relay_consolidated_plan.md
-BUILD_PLAN.md
 CLAUDE.md
-BACK_LOG.md
-failure_to_launch.md
+build_plans/
 
-# Private sample/reference files — owner-only, contain real credentials and IDs
+# Private / owner-only files — contain real credentials, IDs, or seed phrases
+worker/wrangler.toml
 worker/wrangler.sample.toml
+icp/canister_ids.json
+config.toml.example
 config.sample.toml
