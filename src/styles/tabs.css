@@ -43,3 +43,26 @@
 .tab-pane.active {
   display: block;
 }
+
+/* Toolbar row inside a tab pane (e.g. Clear history button) */
+.tab-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 6px 12px 0;
+}
+
+.btn-text-sm {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
+.btn-text-sm:hover {
+  color: var(--text);
+  background: var(--bg-secondary);
+}

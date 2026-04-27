@@ -5,20 +5,20 @@
 
 import { invoke } from '@tauri-apps/api/tauri'
 import { showErrorToast, showInfoToast } from './toast.js'
+import { t } from './i18n.js'
 
 // ── Module state ──────────────────────────────────────────────────────────────
-// Keys and tokens are kept in JS closure only — never written to the DOM.
 
 let pollingTimer    = null
 let pollingAttempts = 0
-const POLL_MAX      = 100   // 100 × 3 s = 5 minutes
+const POLL_MAX      = 100
 const POLL_INTERVAL = 3000
 
 let countdownTimer = null
 
 let pendingEmail = ''
 let pendingPlan  = ''
-let storedKey    = ''  // full API key or snapshot token, never placed in the DOM
+let storedKey    = ''
 
 // ── Initialisation ────────────────────────────────────────────────────────────
 
@@ -93,18 +93,18 @@ function renderKeyActive(creds) {
   if (planBadge)  planBadge.textContent  = planLabel(creds.plan)
   if (expiryEl)   expiryEl.textContent   = creds.expiry > 0
     ? new Date(Number(creds.expiry) * 1000).toLocaleDateString()
-    : '\u2014'
+    : '—'
   if (endpointEl) endpointEl.value = creds.endpoint_url ?? ''
 
   const copyBtn   = document.getElementById('dev-key-copy-btn')
   const cancelBtn = document.getElementById('dev-cancel-sub-btn')
 
-  const keyForClosure = storedKey  // capture in closure
+  const keyForClosure = storedKey
 
   copyBtn?.addEventListener('click', () => {
     navigator.clipboard.writeText(keyForClosure).catch(() => {})
-    copyBtn.textContent = 'Copied!'
-    setTimeout(() => { copyBtn.textContent = 'Copy' }, 1500)
+    copyBtn.textContent = t('developer.copied')
+    setTimeout(() => { copyBtn.textContent = t('developer.copy') }, 1500)
   })
 
   cancelBtn?.addEventListener('click', async () => {
@@ -146,17 +146,17 @@ function renderSnapshotActive(creds) {
 
     if (downloadBtn) {
       downloadBtn.disabled    = true
-      downloadBtn.textContent = 'Downloading\u2026'
+      downloadBtn.textContent = t('developer.downloading')
     }
     try {
       await invoke('download_threat_export', { format, destination })
-      showInfoToast('Export saved to disk')
+      showInfoToast(t('developer.export_saved'))
       storedKey = ''
       renderNoKey()
       wireNoKeyButtons()
     } catch (err) {
       if (String(err).includes('already used')) {
-        showErrorToast('Token was already used \u2014 credentials cleared')
+        showErrorToast(t('developer.token_used'))
         storedKey = ''
         renderNoKey()
         wireNoKeyButtons()
@@ -166,7 +166,7 @@ function renderSnapshotActive(creds) {
     } finally {
       if (downloadBtn) {
         downloadBtn.disabled    = false
-        downloadBtn.textContent = 'Download to disk'
+        downloadBtn.textContent = t('developer.download_btn')
       }
     }
   })
@@ -193,7 +193,7 @@ function wireNoKeyButtons() {
     }
     pendingEmail = email
     pendingPlan  = 'snapshot'
-    startPolling('Snapshot ($10 once-off)')
+    startPolling(planLabel('snapshot'))
   })
 
   document.querySelectorAll('.dev-plan-btn').forEach(btn => {
@@ -244,7 +244,7 @@ async function doPoll() {
   pollingAttempts++
   if (pollingAttempts > POLL_MAX) {
     stopPolling()
-    showErrorToast('Payment not confirmed after 5 minutes \u2014 try again.')
+    showErrorToast(t('developer.payment_timeout'))
     renderNoKey()
     wireNoKeyButtons()
     return
@@ -254,10 +254,10 @@ async function doPoll() {
   try {
     status = await invoke('poll_developer_status', { email: pendingEmail })
   } catch {
-    return  // transient error, retry next tick
+    return
   }
 
-  if (!status.found) return  // still waiting
+  if (!status.found) return
 
   stopPolling()
   storedKey = status.key
@@ -300,7 +300,7 @@ function startCountdown(expiryUnix) {
     if (secsLeft <= 0) {
       clearInterval(countdownTimer)
       countdownTimer = null
-      if (el) el.textContent = 'Expired'
+      if (el) el.textContent = t('developer.snapshot_expired')
       storedKey = ''
       renderNoKey()
       wireNoKeyButtons()
@@ -328,7 +328,7 @@ function startCountdown(expiryUnix) {
  *   Display string.
  */
 function planLabel(plan) {
-  return { snapshot: 'Snapshot', monthly: 'Monthly' }[plan] ?? plan
+  return t(`developer.plan.${plan}`) || plan
 }
 
 /**
@@ -343,4 +343,3 @@ function planLabel(plan) {
 function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
 }
-

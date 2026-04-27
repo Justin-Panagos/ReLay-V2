@@ -162,6 +162,7 @@ fn main() {
             commands::download::get_downloads,
             commands::download::get_download_by_id,
             commands::download::reset_stale_downloads,
+            commands::download::clear_history,
             commands::download::pause_download,
             commands::download::resume_download,
             commands::download::cancel_download,

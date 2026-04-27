@@ -4,6 +4,7 @@
 
 import { invoke } from '@tauri-apps/api/tauri'
 import { showErrorToast } from './toast.js'
+import { t, loadLocale, getLang } from './i18n.js'
 
 /**
  * Initialises the Settings tab.
@@ -99,6 +100,23 @@ export async function initSettings() {
       if (btn) btn.disabled = false
     }
   })
+
+  await initLanguagePicker()
+}
+
+/**
+ * Reads the stored language preference, sets the select value, and wires
+ * the change handler. Language change applies immediately without restart.
+ */
+async function initLanguagePicker() {
+  const select = document.getElementById('lang-select')
+  if (!select) return
+  select.value = getLang()
+
+  select.addEventListener('change', async () => {
+    await invoke('set_setting', { key: 'language', value: select.value }).catch(() => {})
+    await loadLocale(select.value)
+  })
 }
 
 /**
@@ -122,7 +140,7 @@ async function loadProStatus() {
   const cancelRow     = document.getElementById('pro-cancel-row')
 
   if (statusEl) {
-    statusEl.textContent = isPro ? 'Pro' : 'Free'
+    statusEl.textContent = isPro ? t('settings.pro_active') : t('settings.pro_free')
     statusEl.style.color = isPro
       ? 'var(--accent-green)'
       : 'var(--text-muted)'

@@ -131,7 +131,7 @@ function showInstall() {
   const dot = document.getElementById('status-dot')
   if (dot) {
     dot.className = 'dot dot-disconnected'
-    dot.title = 'ReLay not connected'
+    dot.title = chrome.i18n.getMessage('popupDisconnected')
   }
 }
 

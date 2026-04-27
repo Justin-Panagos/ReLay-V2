@@ -1,0 +1,175 @@
+{
+  "_meta": { "translated_by": "machine", "reviewed": false },
+  "appbar": {
+    "settings": "Configuración",
+    "expand": "Expandir panel"
+  },
+  "nav": {
+    "downloads": "Descargas",
+    "history": "Historial",
+    "torrents": "Torrents",
+    "shield": "Escudo",
+    "detail": "Detalle",
+    "community": "Comunidad",
+    "developer": "Desarrollador"
+  },
+  "downloads": {
+    "empty": "No hay descargas activas",
+    "status": {
+      "starting": "Iniciando…",
+      "complete": "Completado",
+      "paused": "En pausa",
+      "resuming": "Reanudando…",
+      "scanning": "Analizando…",
+      "quarantined": "En cuarentena",
+      "retrying": "Reintentando… ({{attempt}}/4)",
+      "error": "Error: {{message}}"
+    },
+    "url_placeholder": "Pega o arrastra una URL…",
+    "btn_browse": "Explorar…",
+    "btn_start": "Iniciar",
+    "bandwidth_label": "Velocidad",
+    "bandwidth_unlimited": "Ilimitado",
+    "pro_prompt": "Plan gratuito: 1 descarga a la vez.",
+    "pro_prompt_upgrade": "Actualizar a Pro"
+  },
+  "history": {
+    "empty": "No hay historial de descargas",
+    "loading": "Cargando…",
+    "load_failed": "Error al cargar el historial — inténtalo de nuevo.",
+    "status_complete": "Completado",
+    "status_failed": "Fallido",
+    "open_folder": "Abrir carpeta",
+    "clear_btn": "Borrar historial",
+    "cleared": "Historial borrado",
+    "clear_failed": "Error al borrar el historial"
+  },
+  "torrent": {
+    "empty": "Arrastra un archivo .torrent aquí o pega un enlace magnet",
+    "resolving_magnet": "Resolviendo magnet…",
+    "default_name": "Descarga torrent",
+    "status": {
+      "initializing": "Inicializando…",
+      "seeding": "Sembrando",
+      "resolving_metadata": "Resolviendo metadatos…",
+      "connecting": "Conectando…"
+    },
+    "peers": "{{count}} par",
+    "peers_plural": "{{count}} pares",
+    "connecting_peers": "{{count}} conectando…",
+    "finding_peers": "buscando pares…",
+    "ratio": "ratio: {{value}}",
+    "modal": {
+      "title": "Añadir Torrent",
+      "save_to": "Guardar en:",
+      "btn_cancel": "Cancelar",
+      "btn_start": "Iniciar Descarga"
+    }
+  },
+  "shield": {
+    "empty": "No se detectaron amenazas",
+    "layer1": "Reputación de hash",
+    "layer2": "Reglas YARA",
+    "layer3": "Entropía",
+    "layer4": "Tipo de archivo",
+    "layer5": "Reputación de URL",
+    "layer6": "Heurística",
+    "layer7": "Sandbox",
+    "verdict_clean": "Limpio",
+    "verdict_suspicious": "Sospechoso",
+    "verdict_malicious": "Malicioso"
+  },
+  "quarantine": {
+    "loading": "Cargando…",
+    "load_failed": "Error al cargar la cuarentena — inténtalo de nuevo.",
+    "btn_submit": "Enviar a la comunidad para revisión",
+    "btn_restore": "Restaurar a la ubicación original",
+    "btn_delete": "Eliminar permanentemente",
+    "submitted": "Enviado a la base de datos comunitaria",
+    "already_submitted": "Ya enviado"
+  },
+  "settings": {
+    "section_pro": "Pro",
+    "section_appearance": "Apariencia",
+    "section_shield": "Escudo",
+    "pro_status": "Estado",
+    "pro_renews": "Renueva",
+    "pro_device_id": "ID de dispositivo",
+    "pro_email": "Correo electrónico",
+    "pro_upgrade": "Mejorar",
+    "pro_subscription": "Suscripción",
+    "pro_licence": "Licencia",
+    "pro_upgrade_btn": "Actualizar a Pro — R95/mes",
+    "pro_cancel_btn": "Cancelar suscripción",
+    "pro_recheck_btn": "Verificar",
+    "pro_active": "Pro",
+    "pro_free": "Gratis",
+    "theme": "Tema",
+    "theme_auto": "Predeterminado del sistema",
+    "theme_light": "Claro",
+    "theme_dark": "Oscuro",
+    "sandbox_label": "Escaneo Sandbox",
+    "vt_key_label": "Clave API de VirusTotal",
+    "vt_key_placeholder": "Pega la clave API…",
+    "language": "Idioma"
+  },
+  "detail": {
+    "select": "Selecciona una descarga para ver detalles",
+    "file": "Archivo",
+    "url": "URL",
+    "folder": "Carpeta",
+    "open_folder": "Abrir carpeta ↗",
+    "sha256": "SHA-256",
+    "threat": "Amenaza",
+    "sandbox": "Sandbox",
+    "network": "Red",
+    "writes": "Escrituras",
+    "blocked": "Bloqueado",
+    "attempts": "intento(s)",
+    "syscalls": "llamada(s) al sistema"
+  },
+  "community": {
+    "reputation": "Reputación",
+    "empty": "No hay propuestas comunitarias aún",
+    "loading": "Cargando…",
+    "load_failed": "Error al cargar propuestas — inténtalo de nuevo.",
+    "approve": "Aprobar",
+    "reject": "Rechazar",
+    "submitting": "Enviando…"
+  },
+  "developer": {
+    "copy": "Copiar",
+    "copied": "¡Copiado!",
+    "downloading": "Descargando…",
+    "download_btn": "Descargar al disco",
+    "export_saved": "Exportación guardada en el disco",
+    "token_used": "El token ya fue utilizado — credenciales eliminadas",
+    "payment_timeout": "Pago no confirmado después de 5 minutos — inténtalo de nuevo.",
+    "snapshot_expired": "Expirado",
+    "plan": {
+      "snapshot": "Instantánea ($10 única vez)",
+      "monthly": "Mensual"
+    }
+  },
+  "icp": {
+    "offline": "Red ICP inalcanzable — licencia y actualizaciones de patrones pausadas."
+  },
+  "errors": {
+    "network": "Error de red — comprueba tu conexión",
+    "disk_full": "Espacio en disco insuficiente",
+    "url_invalid": "URL inválida"
+  },
+  "extension": {
+    "connected": "Conectado a ReLay",
+    "disconnected": "ReLay no conectado",
+    "no_downloads": "No hay descargas activas",
+    "open_app": "Abrir ReLay",
+    "block_popups": "Bloquear ventanas emergentes",
+    "not_installed_title": "ReLay no instalado",
+    "not_installed_sub": "Instala la aplicación de escritorio para gestionar tus descargas.",
+    "install_mac": "Descargar para macOS",
+    "install_win": "Descargar para Windows",
+    "install_linux": "Descargar para Linux",
+    "blocked_redirect": "ReLay: Redireccionamiento desde botón de cierre bloqueado"
+  }
+}

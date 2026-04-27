@@ -1,0 +1,16 @@
+{
+  "extName":            { "message": "ReLay" },
+  "extDescription":     { "message": "Descargas rápidas y seguras con inteligencia de amenazas descentralizada." },
+  "popupTitle":         { "message": "ReLay" },
+  "popupConnected":     { "message": "Conectado a ReLay" },
+  "popupDisconnected":  { "message": "ReLay no conectado" },
+  "popupNoDownloads":   { "message": "No hay descargas activas" },
+  "popupOpenApp":       { "message": "Abrir ReLay" },
+  "popupBlockPopups":   { "message": "Bloquear ventanas emergentes" },
+  "notInstalledTitle":  { "message": "ReLay no instalado" },
+  "notInstalledSub":    { "message": "Instala la aplicación de escritorio para gestionar tus descargas." },
+  "installMac":         { "message": "Descargar para macOS" },
+  "installWin":         { "message": "Descargar para Windows" },
+  "installLinux":       { "message": "Descargar para Linux" },
+  "blockedRedirect":    { "message": "ReLay: Redireccionamiento desde botón de cierre bloqueado" }
+}

@@ -5,6 +5,8 @@
 import { invoke } from '@tauri-apps/api/tauri'
 import { open } from '@tauri-apps/api/shell'
 import { formatBytes, escHtml } from './utils.js'
+import { showErrorToast, showInfoToast } from './toast.js'
+import { t } from './i18n.js'
 
 /** Maximum number of history records to fetch. */
 const HISTORY_LIMIT = 50
@@ -13,25 +15,41 @@ const HISTORY_LIMIT = 50
  * Loads recent downloads from the database and renders them in the History tab.
  * Clears existing content before re-rendering. Only shows terminal statuses
  * (complete, failed) — active downloads are shown in the Downloads tab.
+ * Also wires the Clear History button on first call.
  */
 export async function loadHistory() {
   const container = document.getElementById('history-list')
   if (!container) return
 
-  container.innerHTML = '<div class="empty-state">Loading\u2026</div>'
+  container.innerHTML = `<div class="empty-state">${t('history.loading')}</div>`
+
+  const clearBtn = document.getElementById('history-clear-btn')
+  if (clearBtn && !clearBtn.dataset.wired) {
+    clearBtn.dataset.wired = '1'
+    clearBtn.addEventListener('click', async () => {
+      try {
+        await invoke('clear_history')
+        showInfoToast(t('history.cleared'))
+        await loadHistory()
+      } catch (err) {
+        console.error('clear_history failed:', err)
+        showErrorToast(`${t('history.clear_failed')}: ${err}`)
+      }
+    })
+  }
 
   let records
   try {
     records = await invoke('get_downloads', { limit: HISTORY_LIMIT })
   } catch {
-    container.innerHTML = '<div class="empty-state">Failed to load history \u2014 try again.</div>'
+    container.innerHTML = `<div class="empty-state">${t('history.load_failed')}</div>`
     return
   }
 
   const done = records.filter(r => r.status === 'complete' || r.status === 'failed')
 
   if (done.length === 0) {
-    container.innerHTML = '<div class="empty-state">No download history yet</div>'
+    container.innerHTML = `<div class="empty-state">${t('history.empty')}</div>`
     return
   }
 
@@ -58,10 +76,10 @@ function renderHistoryCard(record) {
   const isComplete = record.status === 'complete'
   const iconClass = isComplete ? 'status-complete' : 'status-error'
   const iconChar = isComplete ? '&#10003;' : '&#10005;'
-  const statusText = isComplete ? 'Complete' : 'Failed'
-  const sizeText = record.size_bytes ? ' \u00b7 ' + formatBytes(record.size_bytes) : ''
+  const statusText = isComplete ? t('history.status_complete') : t('history.status_failed')
+  const sizeText = record.size_bytes ? ' · ' + formatBytes(record.size_bytes) : ''
   const durationText = (isComplete && record.completed_at && record.created_at)
-    ? ' \u00b7 ' + formatDuration(record.created_at, record.completed_at)
+    ? ' · ' + formatDuration(record.created_at, record.completed_at)
     : ''
   const dateText = formatDate(record.completed_at || record.created_at)
   const safeName = escHtml(record.filename)
@@ -78,7 +96,7 @@ function renderHistoryCard(record) {
         </div>
       </div>
       <div class="card-actions">
-        <button class="btn-icon history-open-btn" title="Open folder" data-path="${safeDest}">&#8599;</button>
+        <button class="btn-icon history-open-btn" title="${t('history.open_folder')}" data-path="${safeDest}">&#8599;</button>
       </div>
     </div>
   `
@@ -123,4 +141,3 @@ function formatDate(ts) {
     minute: '2-digit',
   })
 }
-

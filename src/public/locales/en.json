@@ -1,0 +1,174 @@
+{
+  "appbar": {
+    "settings": "Settings",
+    "expand": "Expand panel"
+  },
+  "nav": {
+    "downloads": "Downloads",
+    "history": "History",
+    "torrents": "Torrents",
+    "shield": "Shield",
+    "detail": "Detail",
+    "community": "Community",
+    "developer": "Developer"
+  },
+  "downloads": {
+    "empty": "No active downloads",
+    "status": {
+      "starting": "Starting…",
+      "complete": "Complete",
+      "paused": "Paused",
+      "resuming": "Resuming…",
+      "scanning": "Scanning…",
+      "quarantined": "Quarantined",
+      "retrying": "Retrying… ({{attempt}}/4)",
+      "error": "Error: {{message}}"
+    },
+    "url_placeholder": "Paste or drop URL…",
+    "btn_browse": "Browse…",
+    "btn_start": "Start",
+    "bandwidth_label": "Speed",
+    "bandwidth_unlimited": "Unlimited",
+    "pro_prompt": "Free plan: 1 download at a time.",
+    "pro_prompt_upgrade": "Upgrade to Pro"
+  },
+  "history": {
+    "empty": "No download history yet",
+    "loading": "Loading…",
+    "load_failed": "Failed to load history — try again.",
+    "status_complete": "Complete",
+    "status_failed": "Failed",
+    "open_folder": "Open folder",
+    "clear_btn": "Clear history",
+    "cleared": "History cleared",
+    "clear_failed": "Failed to clear history"
+  },
+  "torrent": {
+    "empty": "Drop a .torrent file here or paste a magnet link above",
+    "resolving_magnet": "Resolving magnet…",
+    "default_name": "Torrent download",
+    "status": {
+      "initializing": "Initializing…",
+      "seeding": "Seeding",
+      "resolving_metadata": "Resolving metadata…",
+      "connecting": "Connecting…"
+    },
+    "peers": "{{count}} peer",
+    "peers_plural": "{{count}} peers",
+    "connecting_peers": "{{count}} connecting…",
+    "finding_peers": "finding peers…",
+    "ratio": "ratio: {{value}}",
+    "modal": {
+      "title": "Add Torrent",
+      "save_to": "Save to:",
+      "btn_cancel": "Cancel",
+      "btn_start": "Start Download"
+    }
+  },
+  "shield": {
+    "empty": "No threats detected",
+    "layer1": "Hash reputation",
+    "layer2": "YARA rules",
+    "layer3": "Entropy",
+    "layer4": "File type",
+    "layer5": "URL reputation",
+    "layer6": "Heuristics",
+    "layer7": "Sandbox",
+    "verdict_clean": "Clean",
+    "verdict_suspicious": "Suspicious",
+    "verdict_malicious": "Malicious"
+  },
+  "quarantine": {
+    "loading": "Loading…",
+    "load_failed": "Failed to load quarantine — try again.",
+    "btn_submit": "Submit to community for review",
+    "btn_restore": "Restore to original location",
+    "btn_delete": "Delete permanently",
+    "submitted": "Submitted to community database",
+    "already_submitted": "Already submitted"
+  },
+  "settings": {
+    "section_pro": "Pro",
+    "section_appearance": "Appearance",
+    "section_shield": "Shield",
+    "pro_status": "Status",
+    "pro_renews": "Renews",
+    "pro_device_id": "Device ID",
+    "pro_email": "Email",
+    "pro_upgrade": "Upgrade",
+    "pro_subscription": "Subscription",
+    "pro_licence": "Licence",
+    "pro_upgrade_btn": "Upgrade to Pro — R95/mo",
+    "pro_cancel_btn": "Cancel subscription",
+    "pro_recheck_btn": "Re-check",
+    "pro_active": "Pro",
+    "pro_free": "Free",
+    "theme": "Theme",
+    "theme_auto": "System default",
+    "theme_light": "Light",
+    "theme_dark": "Dark",
+    "sandbox_label": "Sandbox Scanning",
+    "vt_key_label": "VirusTotal API Key",
+    "vt_key_placeholder": "Paste API key…",
+    "language": "Language"
+  },
+  "detail": {
+    "select": "Select a download to see details",
+    "file": "File",
+    "url": "URL",
+    "folder": "Folder",
+    "open_folder": "Open folder ↗",
+    "sha256": "SHA-256",
+    "threat": "Threat",
+    "sandbox": "Sandbox",
+    "network": "Network",
+    "writes": "Writes",
+    "blocked": "Blocked",
+    "attempts": "attempt(s)",
+    "syscalls": "syscall(s)"
+  },
+  "community": {
+    "reputation": "Reputation",
+    "empty": "No community proposals yet",
+    "loading": "Loading…",
+    "load_failed": "Failed to load proposals — try again.",
+    "approve": "Approve",
+    "reject": "Reject",
+    "submitting": "Submitting…"
+  },
+  "developer": {
+    "copy": "Copy",
+    "copied": "Copied!",
+    "downloading": "Downloading…",
+    "download_btn": "Download to disk",
+    "export_saved": "Export saved to disk",
+    "token_used": "Token was already used — credentials cleared",
+    "payment_timeout": "Payment not confirmed after 5 minutes — try again.",
+    "snapshot_expired": "Expired",
+    "plan": {
+      "snapshot": "Snapshot ($10 once-off)",
+      "monthly": "Monthly"
+    }
+  },
+  "icp": {
+    "offline": "ICP network unreachable — licence and pattern updates paused."
+  },
+  "errors": {
+    "network": "Network error — check your connection",
+    "disk_full": "Not enough disk space",
+    "url_invalid": "Invalid URL"
+  },
+  "extension": {
+    "connected": "Connected to ReLay",
+    "disconnected": "ReLay not connected",
+    "no_downloads": "No active downloads",
+    "open_app": "Open ReLay",
+    "block_popups": "Block popups",
+    "not_installed_title": "ReLay not installed",
+    "not_installed_sub": "Install the desktop app to start managing your downloads.",
+    "install_mac": "Download for macOS",
+    "install_win": "Download for Windows",
+    "install_linux": "Download for Linux",
+    "blocked_redirect": "ReLay: Blocked redirect from close button"
+  }
+}

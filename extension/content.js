@@ -115,7 +115,7 @@
         setTimeout(() => {
           if (window.location.origin !== originBefore) {
             history.back()
-            showBlockedToast('ReLay: Blocked redirect from close button')
+            showBlockedToast(chrome.i18n.getMessage('blockedRedirect'))
           }
         }, 50)
       }, { capture: true })

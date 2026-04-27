@@ -6,6 +6,7 @@
 import { invoke } from '@tauri-apps/api/tauri'
 import { escHtml } from './utils.js'
 import { showErrorToast } from './toast.js'
+import { t } from './i18n.js'
 
 /**
  * Hides the Community panel tab and its pane from the UI.
@@ -69,7 +70,7 @@ async function renderProposals() {
   const empty = document.getElementById('community-empty')
   if (!list || !empty) return
 
-  list.innerHTML = '<div class="empty-state">Loading\u2026</div>'
+  list.innerHTML = `<div class="empty-state">${t('community.loading')}</div>`
   empty.classList.add('hidden')
 
   let proposals
@@ -77,7 +78,7 @@ async function renderProposals() {
     proposals = await invoke('get_proposals')
   } catch (err) {
     console.error('get_proposals failed:', err)
-    list.innerHTML = '<div class="empty-state">Failed to load proposals \u2014 try again.</div>'
+    list.innerHTML = `<div class="empty-state">${t('community.load_failed')}</div>`
     return
   }
 
@@ -89,7 +90,6 @@ async function renderProposals() {
   }
 
   empty.classList.add('hidden')
-  // Show newest first.
   for (const proposal of [...proposals].reverse()) {
     list.appendChild(buildProposalCard(proposal))
   }
@@ -105,7 +105,7 @@ async function loadReputation() {
     const score = await invoke('get_reputation')
     scoreEl.textContent = String(score)
   } catch {
-    scoreEl.textContent = '\u2014'
+    scoreEl.textContent = '—'
   }
 }
 
@@ -128,7 +128,6 @@ function buildProposalCard(proposal) {
   const isPending = proposal.status === 'pending'
   const statusClass = `proposal-status-${escHtml(proposal.status)}`
 
-  // created_at is Unix nanoseconds from the canister.
   const date = proposal.created_at
     ? new Date(Number(proposal.created_at) / 1_000_000).toLocaleDateString()
     : ''
@@ -141,8 +140,8 @@ function buildProposalCard(proposal) {
       <span>${escHtml(String(proposal.approve_votes))} approve / ${escHtml(String(proposal.reject_votes))} reject</span>
     </div>
     <div class="proposal-votes">
-      <button class="vote-approve-btn" ${isPending ? '' : 'disabled'}>Approve</button>
-      <button class="vote-reject-btn"  ${isPending ? '' : 'disabled'}>Reject</button>
+      <button class="vote-approve-btn" ${isPending ? '' : 'disabled'}>${t('community.approve')}</button>
+      <button class="vote-reject-btn"  ${isPending ? '' : 'disabled'}>${t('community.reject')}</button>
     </div>
   `
 
@@ -152,7 +151,7 @@ function buildProposalCard(proposal) {
   approveBtn.addEventListener('click', async () => {
     approveBtn.disabled = true
     rejectBtn.disabled = true
-    approveBtn.textContent = 'Submitting\u2026'
+    approveBtn.textContent = t('community.submitting')
     await handleVote(proposal.id, true, approveBtn, rejectBtn)
     await loadCommunity()
   })
@@ -160,7 +159,7 @@ function buildProposalCard(proposal) {
   rejectBtn.addEventListener('click', async () => {
     rejectBtn.disabled = true
     approveBtn.disabled = true
-    rejectBtn.textContent = 'Submitting\u2026'
+    rejectBtn.textContent = t('community.submitting')
     await handleVote(proposal.id, false, approveBtn, rejectBtn)
     await loadCommunity()
   })

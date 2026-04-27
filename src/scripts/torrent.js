@@ -8,6 +8,7 @@ import { invoke } from '@tauri-apps/api/tauri'
 import { appWindow } from '@tauri-apps/api/window'
 import { formatBytes, escHtml } from './utils.js'
 import { showErrorToast } from './toast.js'
+import { t } from './i18n.js'
 
 /** Maximum number of torrent records to fetch from the database on load. */
 const TORRENT_LOAD_LIMIT = 50
@@ -33,7 +34,7 @@ let pendingFileBytes = null
 export function addTorrentCard(id, name, destination = '') {
   document.getElementById('torrents-empty').classList.add('hidden')
 
-  const shortName = name.startsWith('magnet:') ? 'Resolving magnet\u2026' : escHtml(name)
+  const shortName = name.startsWith('magnet:') ? t('torrent.resolving_magnet') : escHtml(name)
 
   const card = document.createElement('div')
   card.className = 'download-card'
@@ -45,7 +46,7 @@ export function addTorrentCard(id, name, destination = '') {
       <div class="card-name" title="${escHtml(name)}">${shortName}</div>
       <div class="progress-bar"><div class="progress-fill progress-fill--indeterminate"></div></div>
       <div class="card-meta">
-        <span class="card-status">Initializing\u2026</span>
+        <span class="card-status" data-i18n-key="torrent.status.initializing">${t('torrent.status.initializing')}</span>
         <span class="card-speed"></span>
       </div>
       <div class="card-torrent-meta">
@@ -68,7 +69,6 @@ export function addTorrentCard(id, name, destination = '') {
 
   card.querySelector('.card-pause').addEventListener('click', async (e) => {
     e.stopPropagation()
-
     try {
       await invoke('pause_torrent', { id })
     } catch (err) {
@@ -79,7 +79,6 @@ export function addTorrentCard(id, name, destination = '') {
 
   card.querySelector('.card-resume').addEventListener('click', async (e) => {
     e.stopPropagation()
-
     try {
       await invoke('resume_torrent', { id })
       setTorrentCardResuming(id)
@@ -107,7 +106,6 @@ export function addTorrentCard(id, name, destination = '') {
   card.querySelector('.card-seed-stop').addEventListener('click', async (e) => {
     e.stopPropagation()
     card.querySelector('.card-seed-dropdown').classList.add('hidden')
-
     try {
       await invoke('cancel_torrent', { id })
     } catch (err) {
@@ -145,8 +143,7 @@ export function updateTorrentProgress(id, downloaded, total, peers, connecting, 
   const ratioEl = card.querySelector('.card-ratio')
   const nameEl = card.querySelector('.card-name')
 
-  // Update card name once metadata resolves.
-  if (name && nameEl && nameEl.textContent === 'Resolving magnet\u2026') {
+  if (name && nameEl && nameEl.textContent === t('torrent.resolving_magnet')) {
     nameEl.textContent = escHtml(name)
     nameEl.title = escHtml(name)
   }
@@ -155,35 +152,42 @@ export function updateTorrentProgress(id, downloaded, total, peers, connecting, 
     fill.classList.remove('progress-fill--indeterminate')
     fill.style.width = `${Math.round((downloaded / total) * 100)}%`
     statusEl.textContent = `${Math.round((downloaded / total) * 100)}% of ${formatBytes(total)}`
+    delete statusEl.dataset.i18nKey
   } else {
     fill.style.width = ''
     fill.classList.add('progress-fill--indeterminate')
     if (state === 'initializing') {
-      statusEl.textContent = 'Resolving metadata\u2026'
+      statusEl.textContent = t('torrent.status.resolving_metadata')
+      statusEl.dataset.i18nKey = 'torrent.status.resolving_metadata'
     } else if (state === 'live') {
-      statusEl.textContent = 'Connecting\u2026'
+      statusEl.textContent = t('torrent.status.connecting')
+      statusEl.dataset.i18nKey = 'torrent.status.connecting'
     } else {
       statusEl.textContent = formatBytes(downloaded)
+      delete statusEl.dataset.i18nKey
     }
   }
 
-  speedEl.textContent = speedBps > 1024 ? `\u2193 ${formatBytes(speedBps)}/s` : ''
+  speedEl.textContent = speedBps > 1024 ? `↓ ${formatBytes(speedBps)}/s` : ''
 
-  // Show connecting count during init so user can see DHT activity.
   const totalPeerActivity = peers + connecting
   if (peers > 0) {
-    peersEl.textContent = `${peers} peer${peers !== 1 ? 's' : ''}`
+    peersEl.textContent = peers === 1
+      ? t('torrent.peers', { count: peers })
+      : t('torrent.peers_plural', { count: peers })
   } else if (connecting > 0) {
-    peersEl.textContent = `${connecting} connecting\u2026`
+    peersEl.textContent = t('torrent.connecting_peers', { count: connecting })
   } else {
-    peersEl.textContent = totalPeerActivity === 0 ? 'finding peers\u2026' : `${totalPeerActivity} peers`
+    peersEl.textContent = totalPeerActivity === 0
+      ? t('torrent.finding_peers')
+      : t('torrent.peers_plural', { count: totalPeerActivity })
   }
 
-  ratioEl.textContent = `ratio: ${ratio.toFixed(2)}`
+  ratioEl.textContent = t('torrent.ratio', { value: ratio.toFixed(2) })
 }
 
 /**
- * Marks a torrent card as complete (seeding state) — green icon, "Seeding" status.
+ * Marks a torrent card as complete (seeding state) — green icon, seeding status.
  * Hides pause/cancel buttons, shows a stop-seeding option.
  *
  * Args:
@@ -199,7 +203,10 @@ export function setTorrentCardComplete(id, path) {
   icon.innerHTML = '&#8593;'
 
   card.querySelector('.progress-bar').style.display = 'none'
-  card.querySelector('.card-status').textContent = 'Seeding'
+  const statusEl = card.querySelector('.card-status')
+  statusEl.textContent = t('torrent.status.seeding')
+  statusEl.dataset.i18nKey = 'torrent.status.seeding'
+  delete statusEl.dataset.i18nVars
   card.querySelector('.card-speed').textContent = ''
   card.querySelector('.card-pause').style.display = 'none'
   card.querySelector('.card-resume').style.display = 'none'
@@ -226,7 +233,10 @@ export function setTorrentCardError(id, message) {
   icon.innerHTML = '&#10005;'
 
   card.querySelector('.progress-bar').style.display = 'none'
-  card.querySelector('.card-status').textContent = `Error: ${message}`
+  const statusEl = card.querySelector('.card-status')
+  statusEl.textContent = t('downloads.status.error', { message })
+  statusEl.dataset.i18nKey = 'downloads.status.error'
+  statusEl.dataset.i18nVars = JSON.stringify({ message })
   card.querySelector('.card-speed').textContent = ''
   card.querySelector('.card-pause').style.display = 'none'
   card.querySelector('.card-resume').style.display = 'none'
@@ -234,7 +244,7 @@ export function setTorrentCardError(id, message) {
 }
 
 /**
- * Transitions a torrent card to the paused state — amber icon, "Paused" status,
+ * Transitions a torrent card to the paused state — amber icon, paused status,
  * swaps the pause button for the resume button.
  *
  * Args:
@@ -248,7 +258,10 @@ export function setTorrentCardPaused(id) {
   icon.className = 'card-type-icon status-paused'
   icon.innerHTML = '&#8759;'
 
-  card.querySelector('.card-status').textContent = 'Paused'
+  const statusEl = card.querySelector('.card-status')
+  statusEl.textContent = t('downloads.status.paused')
+  statusEl.dataset.i18nKey = 'downloads.status.paused'
+  delete statusEl.dataset.i18nVars
   card.querySelector('.card-speed').textContent = ''
   card.querySelector('.card-pause').style.display = 'none'
   card.querySelector('.card-resume').style.display = ''
@@ -268,7 +281,10 @@ function setTorrentCardResuming(id) {
   icon.className = 'card-type-icon status-downloading'
   icon.innerHTML = '&#8595;'
 
-  card.querySelector('.card-status').textContent = 'Resuming\u2026'
+  const statusEl = card.querySelector('.card-status')
+  statusEl.textContent = t('downloads.status.resuming')
+  statusEl.dataset.i18nKey = 'downloads.status.resuming'
+  delete statusEl.dataset.i18nVars
   card.querySelector('.card-pause').style.display = ''
   card.querySelector('.card-resume').style.display = 'none'
 }
@@ -380,7 +396,6 @@ export async function openTorrentModal(file) {
     listEl.appendChild(item)
   }
 
-  // Pre-fill destination with default folder.
   let defaultFolder = '.'
   try {
     defaultFolder = (await invoke('get_setting', { key: 'default_folder' })) ?? '.'
@@ -414,11 +429,9 @@ export function initTorrentDrop() {
     await openTorrentModal(file)
   })
 
-  // Modal close / cancel.
   document.getElementById('torrent-modal-close').addEventListener('click', closeModal)
   document.getElementById('torrent-modal-cancel').addEventListener('click', closeModal)
 
-  // Modal confirm — start the torrent download.
   document.getElementById('torrent-modal-confirm').addEventListener('click', async () => {
     if (!pendingFileBytes) return
 
@@ -441,13 +454,12 @@ export function initTorrentDrop() {
 
     closeModal()
 
-    // Switch to torrent tab.
-    document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'))
-    document.querySelectorAll('.tab-pane').forEach((p) => p.classList.remove('active'))
+    document.querySelectorAll('.tab').forEach((tab) => tab.classList.remove('active'))
+    document.querySelectorAll('.tab-pane').forEach((pane) => pane.classList.remove('active'))
     document.querySelector('.tab[data-tab="torrent"]').classList.add('active')
     document.getElementById('tab-torrent').classList.add('active')
 
-    addTorrentCard(id, 'Torrent download', destination)
+    addTorrentCard(id, t('torrent.default_name'), destination)
     await subscribeToTorrentEvents(id)
   })
 }

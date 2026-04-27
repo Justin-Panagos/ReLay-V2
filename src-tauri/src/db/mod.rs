@@ -686,6 +686,21 @@ pub fn delete_quarantine_entry(conn: &Connection, id: i64) -> Result<()> {
     Ok(())
 }
 
+/// Deletes all download rows whose status is 'complete' or 'failed'.
+///
+/// Args:
+///   conn: Open database connection.
+///
+/// Returns:
+///   Ok(()) on success, or a rusqlite error.
+pub fn clear_history(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "DELETE FROM downloads WHERE status IN ('complete', 'failed')",
+        [],
+    )?;
+    Ok(())
+}
+
 /// Stores the hex-encoded SHA-256 hash for a download row.
 ///
 /// Args:

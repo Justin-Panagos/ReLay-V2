@@ -20,34 +20,40 @@
       <header id="app-bar">
         <span id="app-title">ReLay</span>
         <div id="app-bar-actions">
-          <button class="btn-icon" id="menu-btn" title="Menu">&#8801;</button>
-          <button class="btn-icon" id="settings-btn" title="Settings">&#9881;</button>
-          <button class="btn-icon" id="expand-btn" title="Expand panel">+</button>
+          <button class="btn-icon" id="settings-btn" data-i18n-title="appbar.settings" title="Settings">&#9881;</button>
+          <button class="btn-icon" id="expand-btn" data-i18n-title="appbar.expand" title="Expand panel">+</button>
         </div>
       </header>
 
       <!-- ICP offline banner — shown when ICP network is unreachable -->
       <div id="icp-banner" class="icp-banner hidden">
-        <span id="icp-banner-msg">ICP network unreachable — licence and pattern updates paused.</span>
+        <span id="icp-banner-msg" data-i18n="icp.offline">ICP network unreachable — licence and pattern updates paused.</span>
         <button id="icp-banner-close" class="btn-icon">&#10005;</button>
       </div>
 
       <!-- URL input area -->
       <div id="input-area">
-        <input id="url-input" type="text" placeholder="Paste or drop URL..." />
+        <input id="url-input" type="text"
+               data-i18n-placeholder="downloads.url_placeholder"
+               placeholder="Paste or drop URL..." />
         <div id="input-actions">
-          <button id="folder-btn" title="Choose the folder where downloads are saved">Browse...</button>
-          <button id="start-btn" title="Start downloading the URL above">Start</button>
+          <button id="folder-btn"
+                  data-i18n-title="downloads.btn_browse"
+                  data-i18n="downloads.btn_browse"
+                  title="Choose the folder where downloads are saved">Browse...</button>
+          <button id="start-btn"
+                  data-i18n-title="downloads.btn_start"
+                  data-i18n="downloads.btn_start"
+                  title="Start downloading the URL above">Start</button>
         </div>
       </div>
 
       <!-- Tab bar -->
       <nav id="tab-bar">
-        <button class="tab active" data-tab="downloads">Downloads</button>
-        <button class="tab" data-tab="history">History</button>
-        <button class="tab" data-tab="torrent">Torrent</button>
-        <button class="tab" data-tab="quarantine">Shield</button>
-        <button class="tab" data-tab="settings">Settings</button>
+        <button class="tab active" data-tab="downloads" data-i18n="nav.downloads">Downloads</button>
+        <button class="tab" data-tab="history" data-i18n="nav.history">History</button>
+        <button class="tab" data-tab="torrent" data-i18n="nav.torrents">Torrents</button>
+        <button class="tab" data-tab="quarantine" data-i18n="nav.shield">Shield</button>
       </nav>
 
       <!-- Tab content -->
@@ -55,88 +61,100 @@
 
         <div id="tab-downloads" class="tab-pane active">
           <div id="pro-prompt" class="pro-prompt hidden">
-            <span>Free plan: 1 download at a time.</span>
-            <button class="pro-prompt-upgrade">Upgrade to Pro</button>
+            <span data-i18n="downloads.pro_prompt">Free plan: 1 download at a time.</span>
+            <button class="pro-prompt-upgrade" data-i18n="downloads.pro_prompt_upgrade">Upgrade to Pro</button>
             <button class="pro-prompt-dismiss">&#10005;</button>
           </div>
           <div id="downloads-list">
-            <div class="empty-state" id="downloads-empty">No active downloads</div>
+            <div class="empty-state" id="downloads-empty" data-i18n="downloads.empty">No active downloads</div>
           </div>
         </div>
 
         <div id="tab-history" class="tab-pane">
+          <div class="tab-toolbar">
+            <button id="history-clear-btn" class="btn-text-sm" data-i18n="history.clear_btn">Clear history</button>
+          </div>
           <div id="history-list">
-            <div class="empty-state">No download history yet</div>
+            <div class="empty-state" data-i18n="history.empty">No download history yet</div>
           </div>
         </div>
 
         <div id="tab-torrent" class="tab-pane">
           <div id="torrents-list">
-            <div class="empty-state" id="torrents-empty">Drop a .torrent file here or paste a magnet link above</div>
+            <div class="empty-state" id="torrents-empty" data-i18n="torrent.empty">Drop a .torrent file here or paste a magnet link above</div>
           </div>
         </div>
 
         <div id="tab-quarantine" class="tab-pane">
           <div id="quarantine-list"></div>
-          <div id="quarantine-empty" class="empty-state">No threats detected</div>
+          <div id="quarantine-empty" class="empty-state" data-i18n="shield.empty">No threats detected</div>
         </div>
-
 
         <div id="tab-settings" class="tab-pane">
           <div class="settings-section">
-            <div class="settings-section-title">Pro</div>
+            <div class="settings-section-title" data-i18n="settings.section_pro">Pro</div>
             <div class="settings-row">
-              <span class="settings-label">Status</span>
+              <span class="settings-label" data-i18n="settings.pro_status">Status</span>
               <span id="pro-status-value" class="settings-value">&#8212;</span>
             </div>
             <div class="settings-row">
-              <span class="settings-label">Renews</span>
+              <span class="settings-label" data-i18n="settings.pro_renews">Renews</span>
               <span id="pro-expiry-value" class="settings-value">&#8212;</span>
             </div>
             <div class="settings-row">
-              <span class="settings-label">Device ID</span>
+              <span class="settings-label" data-i18n="settings.pro_device_id">Device ID</span>
               <span id="pro-device-id" class="settings-value settings-device-id" title="">&#8212;</span>
             </div>
             <div class="settings-row" id="pro-upgrade-row">
-              <span class="settings-label">Email</span>
+              <span class="settings-label" data-i18n="settings.pro_email">Email</span>
               <input type="email" id="pro-email-input" class="settings-input" placeholder="your@email.com" />
             </div>
             <div class="settings-row" id="pro-upgrade-btn-row">
-              <span class="settings-label">Upgrade</span>
-              <button id="pro-upgrade-btn" class="btn-primary">Upgrade to Pro &#8212; R95/mo</button>
+              <span class="settings-label" data-i18n="settings.pro_upgrade">Upgrade</span>
+              <button id="pro-upgrade-btn" class="btn-primary" data-i18n="settings.pro_upgrade_btn">Upgrade to Pro &#8212; R95/mo</button>
             </div>
             <div class="settings-row hidden" id="pro-cancel-row">
-              <span class="settings-label">Subscription</span>
-              <button id="pro-cancel-btn" class="btn-secondary">Cancel subscription</button>
+              <span class="settings-label" data-i18n="settings.pro_subscription">Subscription</span>
+              <button id="pro-cancel-btn" class="btn-secondary" data-i18n="settings.pro_cancel_btn">Cancel subscription</button>
             </div>
             <div class="settings-row">
-              <span class="settings-label">Licence</span>
-              <button id="pro-recheck-btn" class="btn-secondary">Re-check</button>
+              <span class="settings-label" data-i18n="settings.pro_licence">Licence</span>
+              <button id="pro-recheck-btn" class="btn-secondary" data-i18n="settings.pro_recheck_btn">Re-check</button>
             </div>
           </div>
           <div class="settings-section">
-            <div class="settings-section-title">Appearance</div>
+            <div class="settings-section-title" data-i18n="settings.section_appearance">Appearance</div>
             <label class="settings-row">
-              <span class="settings-label">Theme</span>
+              <span class="settings-label" data-i18n="settings.theme">Theme</span>
               <select id="setting-theme" class="settings-input">
-                <option value="auto">System default</option>
-                <option value="light">Light</option>
-                <option value="dark">Dark</option>
+                <option value="auto" data-i18n="settings.theme_auto">System default</option>
+                <option value="light" data-i18n="settings.theme_light">Light</option>
+                <option value="dark" data-i18n="settings.theme_dark">Dark</option>
+              </select>
+            </label>
+            <label class="settings-row">
+              <span class="settings-label" data-i18n="settings.language">Language</span>
+              <select id="lang-select" class="settings-input">
+                <option value="en">English</option>
+                <option value="es">Español</option>
+                <option value="fr">Français</option>
+                <option value="pt">Português</option>
               </select>
             </label>
           </div>
           <div class="settings-section">
-            <div class="settings-section-title">Shield</div>
+            <div class="settings-section-title" data-i18n="settings.section_shield">Shield</div>
             <label class="settings-row">
               <span class="settings-label">
-                Sandbox Scanning
+                <span data-i18n="settings.sandbox_label">Sandbox Scanning</span>
                 <span class="settings-badge-pro">Pro</span>
               </span>
               <input type="checkbox" id="setting-sandbox" />
             </label>
             <label class="settings-row">
-              <span class="settings-label">VirusTotal API Key</span>
+              <span class="settings-label" data-i18n="settings.vt_key_label">VirusTotal API Key</span>
               <input type="text" id="setting-vt-key" class="settings-input"
+                     data-i18n-placeholder="settings.vt_key_placeholder"
                      placeholder="Paste API key&#8230;" />
             </label>
           </div>
@@ -151,25 +169,25 @@
     <!-- Right detail panel (hidden until expanded) -->
     <div id="detail-panel" class="hidden">
       <nav id="panel-tab-bar">
-        <button class="panel-tab active" data-panel-tab="detail">Detail</button>
-        <button class="panel-tab" data-panel-tab="community">Community</button>
-        <button class="panel-tab" data-panel-tab="developer">Developer</button>
+        <button class="panel-tab active" data-panel-tab="detail" data-i18n="nav.detail">Detail</button>
+        <button class="panel-tab" data-panel-tab="community" data-i18n="nav.community">Community</button>
+        <button class="panel-tab" data-panel-tab="developer" data-i18n="nav.developer">Developer</button>
       </nav>
 
       <div class="panel-pane active" id="panel-detail">
         <div class="detail-body">
-          <p>Select a download to see details</p>
+          <p data-i18n="detail.select">Select a download to see details</p>
         </div>
       </div>
 
       <div class="panel-pane" id="panel-community">
         <div class="community-header">
-          <span class="community-rep-label">Reputation</span>
+          <span class="community-rep-label" data-i18n="community.reputation">Reputation</span>
           <span id="community-rep-score" class="community-rep-value">&#8212;</span>
           <button id="community-refresh-btn" class="btn-icon" title="Refresh proposals">&#8635;</button>
         </div>
         <div id="community-proposals-list"></div>
-        <div id="community-empty" class="empty-state">No community proposals yet</div>
+        <div id="community-empty" class="empty-state" data-i18n="community.empty">No community proposals yet</div>
       </div>
 
       <div class="panel-pane" id="panel-developer">
@@ -289,19 +307,20 @@
   <div id="torrent-modal" class="modal-overlay hidden" role="dialog" aria-modal="true">
     <div class="modal-box">
       <div class="modal-header">
-        <span class="modal-title">Add Torrent</span>
+        <span class="modal-title" data-i18n="torrent.modal.title">Add Torrent</span>
         <button class="btn-icon modal-close" id="torrent-modal-close">&#10005;</button>
       </div>
       <div class="modal-body">
         <div id="torrent-file-list"><!-- populated by torrent.js --></div>
       </div>
       <div class="modal-footer">
-        <label class="modal-label">Save to:
+        <label class="modal-label">
+          <span data-i18n="torrent.modal.save_to">Save to:</span>
           <input id="torrent-dest-input" type="text" class="modal-input" />
         </label>
         <div class="modal-actions">
-          <button id="torrent-modal-cancel" class="btn-secondary">Cancel</button>
-          <button id="torrent-modal-confirm" class="btn-primary">Start Download</button>
+          <button id="torrent-modal-cancel" class="btn-secondary" data-i18n="torrent.modal.btn_cancel">Cancel</button>
+          <button id="torrent-modal-confirm" class="btn-primary" data-i18n="torrent.modal.btn_start">Start Download</button>
         </div>
       </div>
     </div>

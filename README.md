@@ -71,7 +71,7 @@ A cross-platform desktop download manager built with Rust and Tauri. ReLay combi
 | Virus scanning | yara-rs, goblin, infer, memmap2, sha2 |
 | Scheduling | chrono |
 | ICP canisters | ic-cdk, ic-agent, candid |
-| Payments | Stripe + Cloudflare Workers |
+| Payments | Paystack + Cloudflare Workers |
 | Frontend | HTML + CSS + Vanilla JS |
 | Browser extension | Chrome/Firefox Manifest V3 |
 | Build tool | Vite |
@@ -114,6 +114,118 @@ npm run tauri build
 ```
 
 Outputs to `src-tauri/target/release/bundle/`.
+
+---
+
+## Acquisition Due Diligence — Running the Code
+
+This section is written for prospective buyers who want to run, explore, and verify the full stack before any acquisition discussion.
+
+### Step 1 — Prerequisites
+
+Follow the platform-specific steps in **Building From Source** above, then come back here.
+
+### Step 2 — Config file
+
+The app reads canister IDs and the worker URL from a `config.toml` at the project root. This file is gitignored (it holds deployment credentials). Create it now:
+
+```bash
+cp config.toml.example config.toml
+```
+
+Then open `config.toml` and fill in the live values:
+
+```toml
+icp_url    = "https://ic0.app"
+worker_url = "https://relay-worker.<subdomain>.workers.dev"
+
+[canisters]
+pattern    = "byq2x-tqaaa-aaaao-qpsaq-cai"
+governance = "wf57k-faaaa-aaaao-qpr7q-cai"
+identity   = "b7r4d-6iaaa-aaaao-qpsaa-cai"
+update     = "brtrl-fyaaa-aaaao-qpsba-cai"
+```
+
+The canister IDs above are the live mainnet deployments. The `worker_url` is available from the seller on request.
+
+### Step 3 — Run in development
+
+```bash
+npm install
+npm run tauri dev
+```
+
+The app window opens in roughly 30 seconds on first compile (Rust cold build). Subsequent runs are fast.
+
+### Step 4 — What you can test without any credentials
+
+These features work immediately with no API keys or accounts:
+
+| Feature | How to test |
+|---|---|
+| HTTP downloads | Paste `https://proof.ovh.net/files/10Mb.dat` and click Start |
+| Chunked parallel download | Watch the download card — speed should exceed a single-connection browser download |
+| Pause / resume / cancel | Use the controls on any active download card |
+| Torrent (magnet link) | Paste any public-domain magnet link (e.g. Debian ISO) |
+| Queue management | Start multiple downloads, drag to reorder |
+| Shield layers 2–4 | Download any file — YARA, entropy, and file-type checks run automatically, no key needed |
+| EICAR virus test | Download `https://www.eicar.org/download/eicar.com` — Shield should quarantine it |
+| Quarantine tab | Quarantined files appear here with restore/delete options |
+| Dark/light theme | Follows OS theme automatically |
+| Settings | All toggles and preferences persist via SQLite |
+
+### Step 5 — What requires credentials
+
+| Feature | Credential needed | How to get it |
+|---|---|---|
+| Shield Layer 1 (hash check) | VirusTotal API key | Free at virustotal.com — 500 lookups/day |
+| Shield Layer 5 (URL reputation) | Same VirusTotal key | Add to Settings → Shield → VirusTotal API Key |
+| ICP pattern sync | `config.toml` with canister IDs | Use the values in Step 2 |
+| Pro features | Paystack test subscription | Use Paystack test mode — request test credentials from seller |
+| Cloudflare Worker endpoints | `worker_url` in `config.toml` | Available from seller on request |
+
+### Step 6 — Verifying the ICP integration
+
+With `config.toml` populated, the app syncs with the ICP Pattern Canister on startup and every 12 hours. To verify it's working:
+
+1. Open **Settings → Shield** — the ICP sync status should show a timestamp
+2. Open **Settings → Pro** — the Identity Canister will return `Free` for any unregistered device (expected)
+3. The governance canister can be queried directly: `dfx canister call wf57k-faaaa-aaaao-qpr7q-cai get_proposals '()' --network ic`
+
+### Step 7 — Browser extension
+
+The extension communicates with the desktop app via native messaging. This requires a manifest file placed in a platform-specific OS location. Setup is currently manual (the production installer will handle this automatically):
+
+**macOS:**
+```bash
+cp extension/host/com.relay.native.json \
+  ~/Library/Application\ Support/Google/Chrome/NativeMessagingHosts/
+```
+
+**Linux:**
+```bash
+cp extension/host/com.relay.native.json \
+  ~/.config/google-chrome/NativeMessagingHosts/
+```
+
+**Windows:** Add the JSON path to `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.relay.native` in the registry.
+
+Once placed, load the extension unpacked in Chrome (`chrome://extensions` → Load unpacked → select the `extension/` folder). Right-click any download link → "Download with ReLay".
+
+### Step 8 — Architecture walkthrough
+
+For a technical deep-dive, the entry points are:
+
+| Area | Start here |
+|---|---|
+| Rust backend entry point | `src-tauri/src/main.rs` |
+| Download engine | `src-tauri/src/download/mod.rs` |
+| Shield pipeline | `src-tauri/src/shield/mod.rs` |
+| ICP agent | `src-tauri/src/icp/mod.rs` |
+| Pro feature gating | `src-tauri/src/pro/mod.rs` |
+| Cloudflare Worker | `worker/index.js` |
+| ICP canisters | `icp/pattern/src/lib.rs`, `icp/identity/src/lib.rs` |
+| Frontend entry | `src/index.html`, `src/scripts/main.js` |
 
 ---
 

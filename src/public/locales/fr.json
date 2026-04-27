@@ -1,0 +1,175 @@
+{
+  "_meta": { "translated_by": "machine", "reviewed": false },
+  "appbar": {
+    "settings": "Paramètres",
+    "expand": "Agrandir le panneau"
+  },
+  "nav": {
+    "downloads": "Téléchargements",
+    "history": "Historique",
+    "torrents": "Torrents",
+    "shield": "Bouclier",
+    "detail": "Détail",
+    "community": "Communauté",
+    "developer": "Développeur"
+  },
+  "downloads": {
+    "empty": "Aucun téléchargement actif",
+    "status": {
+      "starting": "Démarrage…",
+      "complete": "Terminé",
+      "paused": "En pause",
+      "resuming": "Reprise…",
+      "scanning": "Analyse…",
+      "quarantined": "En quarantaine",
+      "retrying": "Nouvelle tentative… ({{attempt}}/4)",
+      "error": "Erreur : {{message}}"
+    },
+    "url_placeholder": "Coller ou déposer une URL…",
+    "btn_browse": "Parcourir…",
+    "btn_start": "Démarrer",
+    "bandwidth_label": "Vitesse",
+    "bandwidth_unlimited": "Illimité",
+    "pro_prompt": "Forfait gratuit : 1 téléchargement à la fois.",
+    "pro_prompt_upgrade": "Passer à Pro"
+  },
+  "history": {
+    "empty": "Aucun historique de téléchargement",
+    "loading": "Chargement…",
+    "load_failed": "Échec du chargement de l'historique — réessayez.",
+    "status_complete": "Terminé",
+    "status_failed": "Échoué",
+    "open_folder": "Ouvrir le dossier",
+    "clear_btn": "Effacer l'historique",
+    "cleared": "Historique effacé",
+    "clear_failed": "Échec de l'effacement de l'historique"
+  },
+  "torrent": {
+    "empty": "Déposez un fichier .torrent ici ou collez un lien magnet",
+    "resolving_magnet": "Résolution du magnet…",
+    "default_name": "Téléchargement torrent",
+    "status": {
+      "initializing": "Initialisation…",
+      "seeding": "Partage",
+      "resolving_metadata": "Résolution des métadonnées…",
+      "connecting": "Connexion…"
+    },
+    "peers": "{{count}} pair",
+    "peers_plural": "{{count}} pairs",
+    "connecting_peers": "{{count}} en connexion…",
+    "finding_peers": "recherche de pairs…",
+    "ratio": "ratio : {{value}}",
+    "modal": {
+      "title": "Ajouter un Torrent",
+      "save_to": "Enregistrer dans :",
+      "btn_cancel": "Annuler",
+      "btn_start": "Lancer le Téléchargement"
+    }
+  },
+  "shield": {
+    "empty": "Aucune menace détectée",
+    "layer1": "Réputation du hachage",
+    "layer2": "Règles YARA",
+    "layer3": "Entropie",
+    "layer4": "Type de fichier",
+    "layer5": "Réputation de l'URL",
+    "layer6": "Heuristique",
+    "layer7": "Sandbox",
+    "verdict_clean": "Propre",
+    "verdict_suspicious": "Suspect",
+    "verdict_malicious": "Malveillant"
+  },
+  "quarantine": {
+    "loading": "Chargement…",
+    "load_failed": "Échec du chargement de la quarantaine — réessayez.",
+    "btn_submit": "Soumettre à la communauté pour examen",
+    "btn_restore": "Restaurer à l'emplacement d'origine",
+    "btn_delete": "Supprimer définitivement",
+    "submitted": "Soumis à la base de données communautaire",
+    "already_submitted": "Déjà soumis"
+  },
+  "settings": {
+    "section_pro": "Pro",
+    "section_appearance": "Apparence",
+    "section_shield": "Bouclier",
+    "pro_status": "Statut",
+    "pro_renews": "Renouvellement",
+    "pro_device_id": "ID de l'appareil",
+    "pro_email": "E-mail",
+    "pro_upgrade": "Mettre à niveau",
+    "pro_subscription": "Abonnement",
+    "pro_licence": "Licence",
+    "pro_upgrade_btn": "Passer à Pro — R95/mois",
+    "pro_cancel_btn": "Résilier l'abonnement",
+    "pro_recheck_btn": "Vérifier",
+    "pro_active": "Pro",
+    "pro_free": "Gratuit",
+    "theme": "Thème",
+    "theme_auto": "Par défaut du système",
+    "theme_light": "Clair",
+    "theme_dark": "Sombre",
+    "sandbox_label": "Analyse Sandbox",
+    "vt_key_label": "Clé API VirusTotal",
+    "vt_key_placeholder": "Coller la clé API…",
+    "language": "Langue"
+  },
+  "detail": {
+    "select": "Sélectionnez un téléchargement pour voir les détails",
+    "file": "Fichier",
+    "url": "URL",
+    "folder": "Dossier",
+    "open_folder": "Ouvrir le dossier ↗",
+    "sha256": "SHA-256",
+    "threat": "Menace",
+    "sandbox": "Sandbox",
+    "network": "Réseau",
+    "writes": "Écritures",
+    "blocked": "Bloqué",
+    "attempts": "tentative(s)",
+    "syscalls": "appel(s) système"
+  },
+  "community": {
+    "reputation": "Réputation",
+    "empty": "Aucune proposition communautaire pour l'instant",
+    "loading": "Chargement…",
+    "load_failed": "Échec du chargement des propositions — réessayez.",
+    "approve": "Approuver",
+    "reject": "Rejeter",
+    "submitting": "Envoi…"
+  },
+  "developer": {
+    "copy": "Copier",
+    "copied": "Copié !",
+    "downloading": "Téléchargement…",
+    "download_btn": "Télécharger sur le disque",
+    "export_saved": "Export enregistré sur le disque",
+    "token_used": "Le jeton a déjà été utilisé — identifiants supprimés",
+    "payment_timeout": "Paiement non confirmé après 5 minutes — réessayez.",
+    "snapshot_expired": "Expiré",
+    "plan": {
+      "snapshot": "Instantané (10 $ unique)",
+      "monthly": "Mensuel"
+    }
+  },
+  "icp": {
+    "offline": "Réseau ICP inaccessible — mise à jour de la licence et des patterns en pause."
+  },
+  "errors": {
+    "network": "Erreur réseau — vérifiez votre connexion",
+    "disk_full": "Espace disque insuffisant",
+    "url_invalid": "URL invalide"
+  },
+  "extension": {
+    "connected": "Connecté à ReLay",
+    "disconnected": "ReLay non connecté",
+    "no_downloads": "Aucun téléchargement actif",
+    "open_app": "Ouvrir ReLay",
+    "block_popups": "Bloquer les popups",
+    "not_installed_title": "ReLay non installé",
+    "not_installed_sub": "Installez l'application de bureau pour gérer vos téléchargements.",
+    "install_mac": "Télécharger pour macOS",
+    "install_win": "Télécharger pour Windows",
+    "install_linux": "Télécharger pour Linux",
+    "blocked_redirect": "ReLay : redirection depuis le bouton de fermeture bloquée"
+  }
+}

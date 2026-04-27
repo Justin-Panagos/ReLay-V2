@@ -96,6 +96,19 @@ pub fn reset_stale_downloads(state: State<'_, DbState>) -> Result<(), String> {
     db::reset_stale_downloads(&conn).map_err(|e| e.to_string())
 }
 
+/// Deletes all completed and failed download records from the history.
+///
+/// Args:
+///   state: Tauri managed database state.
+///
+/// Returns:
+///   Ok(()) on success, or an error string.
+#[tauri::command]
+pub fn clear_history(state: State<'_, DbState>) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    db::clear_history(&conn).map_err(|e| e.to_string())
+}
+
 /// Pauses an active download by setting the intent flag to PAUSE and firing
 /// the cancellation token. The background task will yield cleanly, save
 /// chunk snapshots to the database, and emit `download://paused/{id}`.

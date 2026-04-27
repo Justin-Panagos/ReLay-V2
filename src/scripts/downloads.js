@@ -6,6 +6,7 @@
 import { invoke } from '@tauri-apps/api/tauri'
 import { open } from '@tauri-apps/api/shell'
 import { formatBytes, escHtml } from './utils.js'
+import { t } from './i18n.js'
 
 /** @type {Map<number, { url: string, filename: string, destination: string, path?: string }>} */
 const cardData = new Map()
@@ -25,6 +26,8 @@ const cardData = new Map()
 export function addDownloadCard(id, filename, url, destination, { isPaused = false, onResume = null } = {}) {
   document.getElementById('downloads-empty').classList.add('hidden')
 
+  const statusKey = isPaused ? 'downloads.status.paused' : 'downloads.status.starting'
+
   const card = document.createElement('div')
   card.className = 'download-card'
   card.dataset.id = id
@@ -34,7 +37,7 @@ export function addDownloadCard(id, filename, url, destination, { isPaused = fal
       <div class="card-name" title="${escHtml(filename)}">${escHtml(filename)}</div>
       <div class="progress-bar"><div class="progress-fill" style="width:0%"></div></div>
       <div class="card-meta">
-        <span class="card-status">${isPaused ? 'Paused' : 'Starting\u2026'}</span>
+        <span class="card-status" data-i18n-key="${statusKey}">${t(statusKey)}</span>
         <span class="card-speed"></span>
       </div>
     </div>
@@ -87,12 +90,14 @@ export function updateProgress(id, downloaded, total, speedBps) {
     fill.classList.remove('progress-fill--indeterminate')
     fill.style.width = `${Math.round((downloaded / total) * 100)}%`
     statusEl.textContent = `${Math.round((downloaded / total) * 100)}% of ${formatBytes(total)}`
+    delete statusEl.dataset.i18nKey
   } else {
     fill.style.width = ''
     fill.classList.add('progress-fill--indeterminate')
     statusEl.textContent = formatBytes(downloaded)
+    delete statusEl.dataset.i18nKey
   }
-  speedEl.textContent = speedBps > 1024 ? `\u2193 ${formatBytes(speedBps)}/s` : ''
+  speedEl.textContent = speedBps > 1024 ? `↓ ${formatBytes(speedBps)}/s` : ''
 }
 
 /**
@@ -111,7 +116,10 @@ export function setCardComplete(id, path) {
   icon.innerHTML = '&#10003;'
 
   card.querySelector('.progress-bar').style.display = 'none'
-  card.querySelector('.card-status').textContent = 'Complete'
+  const statusEl = card.querySelector('.card-status')
+  statusEl.textContent = t('downloads.status.complete')
+  statusEl.dataset.i18nKey = 'downloads.status.complete'
+  delete statusEl.dataset.i18nVars
   card.querySelector('.card-speed').textContent = ''
   card.querySelector('.card-pause').style.display = 'none'
   card.querySelector('.card-resume').style.display = 'none'
@@ -137,7 +145,10 @@ export function setCardError(id, message) {
   icon.innerHTML = '&#10005;'
 
   card.querySelector('.progress-bar').style.display = 'none'
-  card.querySelector('.card-status').textContent = `Error: ${message}`
+  const statusEl = card.querySelector('.card-status')
+  statusEl.textContent = t('downloads.status.error', { message })
+  statusEl.dataset.i18nKey = 'downloads.status.error'
+  statusEl.dataset.i18nVars = JSON.stringify({ message })
   card.querySelector('.card-speed').textContent = ''
   card.querySelector('.card-pause').style.display = 'none'
   card.querySelector('.card-resume').style.display = 'none'
@@ -145,7 +156,7 @@ export function setCardError(id, message) {
 }
 
 /**
- * Updates a download card to the paused state — amber icon, "Paused" status text,
+ * Updates a download card to the paused state — amber icon, paused status text,
  * swaps the pause button for the resume button.
  *
  * Args:
@@ -159,14 +170,17 @@ export function setCardPaused(id) {
   icon.className = 'card-type-icon status-paused'
   icon.innerHTML = '&#8759;'
 
-  card.querySelector('.card-status').textContent = 'Paused'
+  const statusEl = card.querySelector('.card-status')
+  statusEl.textContent = t('downloads.status.paused')
+  statusEl.dataset.i18nKey = 'downloads.status.paused'
+  delete statusEl.dataset.i18nVars
   card.querySelector('.card-speed').textContent = ''
   card.querySelector('.card-pause').style.display = 'none'
   card.querySelector('.card-resume').style.display = ''
 }
 
 /**
- * Updates a download card to the retrying state — amber icon, "Retrying…" status,
+ * Updates a download card to the retrying state — amber icon, retrying status,
  * and shows a small retry attempt badge on the card.
  *
  * Args:
@@ -181,7 +195,10 @@ export function setCardRetrying(id, attempt) {
   icon.className = 'card-type-icon status-paused'
   icon.innerHTML = '&#8635;'
 
-  card.querySelector('.card-status').textContent = `Retrying… (${attempt}/4)`
+  const statusEl = card.querySelector('.card-status')
+  statusEl.textContent = t('downloads.status.retrying', { attempt })
+  statusEl.dataset.i18nKey = 'downloads.status.retrying'
+  statusEl.dataset.i18nVars = JSON.stringify({ attempt })
   card.querySelector('.card-speed').textContent = ''
   card.querySelector('.card-pause').style.display = 'none'
   card.querySelector('.card-resume').style.display = 'none'
@@ -223,14 +240,17 @@ export function setCardResuming(id) {
   icon.className = 'card-type-icon status-downloading'
   icon.innerHTML = '&#8595;'
 
-  card.querySelector('.card-status').textContent = 'Resuming\u2026'
+  const statusEl = card.querySelector('.card-status')
+  statusEl.textContent = t('downloads.status.resuming')
+  statusEl.dataset.i18nKey = 'downloads.status.resuming'
+  delete statusEl.dataset.i18nVars
   card.querySelector('.card-pause').style.display = ''
   card.querySelector('.card-resume').style.display = 'none'
 }
 
 /**
  * Updates a download card to the scanning state — amber indeterminate progress bar,
- * "Scanning…" status text, and hidden action buttons.
+ * scanning status text, and hidden action buttons.
  *
  * Args:
  *   id: The download id.
@@ -248,7 +268,10 @@ export function setCardScanning(id) {
   fill.style.width = ''
   card.querySelector('.progress-bar').style.display = ''
 
-  card.querySelector('.card-status').textContent = 'Scanning\u2026'
+  const statusEl = card.querySelector('.card-status')
+  statusEl.textContent = t('downloads.status.scanning')
+  statusEl.dataset.i18nKey = 'downloads.status.scanning'
+  delete statusEl.dataset.i18nVars
   card.querySelector('.card-speed').textContent = ''
   card.querySelector('.card-pause').style.display = 'none'
   card.querySelector('.card-resume').style.display = 'none'
@@ -256,7 +279,7 @@ export function setCardScanning(id) {
 }
 
 /**
- * Marks a download card as quarantined — red icon, "Quarantined" status,
+ * Marks a download card as quarantined — red icon, quarantined status,
  * and an inline reason line.
  *
  * Args:
@@ -272,7 +295,10 @@ export function setCardQuarantined(id, reason) {
   icon.innerHTML = '&#9888;'
 
   card.querySelector('.progress-bar').style.display = 'none'
-  card.querySelector('.card-status').textContent = 'Quarantined'
+  const statusEl = card.querySelector('.card-status')
+  statusEl.textContent = t('downloads.status.quarantined')
+  statusEl.dataset.i18nKey = 'downloads.status.quarantined'
+  delete statusEl.dataset.i18nVars
   card.querySelector('.card-speed').textContent = ''
   card.querySelector('.card-pause').style.display = 'none'
   card.querySelector('.card-resume').style.display = 'none'
@@ -362,9 +388,9 @@ export function addBandwidthSlider(id, initialKbps = 0) {
   const row = document.createElement('div')
   row.className = 'card-bandwidth'
   row.innerHTML = `
-    <span class="card-bandwidth-label">Speed</span>
+    <span class="card-bandwidth-label">${t('downloads.bandwidth_label')}</span>
     <input type="range" class="card-bw-slider" min="0" max="50000" step="100" value="${initialKbps}">
-    <span class="card-bw-value">${initialKbps === 0 ? 'Unlimited' : initialKbps + ' kbps'}</span>
+    <span class="card-bw-value">${initialKbps === 0 ? t('downloads.bandwidth_unlimited') : initialKbps + ' kbps'}</span>
   `
 
   const slider = row.querySelector('.card-bw-slider')
@@ -373,7 +399,7 @@ export function addBandwidthSlider(id, initialKbps = 0) {
 
   slider.addEventListener('input', () => {
     const kbps = parseInt(slider.value, 10)
-    valueEl.textContent = kbps === 0 ? 'Unlimited' : `${kbps} kbps`
+    valueEl.textContent = kbps === 0 ? t('downloads.bandwidth_unlimited') : `${kbps} kbps`
     clearTimeout(bwTimer)
     bwTimer = setTimeout(async () => {
       try { await invoke('set_download_bandwidth', { id, kbps }) } catch { /* no-op */ }
@@ -398,39 +424,38 @@ async function showDetail(id) {
   const body = document.querySelector('.detail-body')
   if (!body) return
 
-  // Fetch fresh DB record for scan fields (sha256, scan_threat, sandbox_report).
   let record = null
   try { record = await invoke('get_download_by_id', { id }) } catch { /* no-op */ }
 
   let scanHtml = ''
   if (record?.sha256) {
-    scanHtml += `<dt>SHA-256</dt><dd class="detail-hash">${escHtml(record.sha256)}</dd>`
+    scanHtml += `<dt>${t('detail.sha256')}</dt><dd class="detail-hash">${escHtml(record.sha256)}</dd>`
   }
   if (record?.scan_threat) {
-    scanHtml += `<dt>Threat</dt><dd class="status-error">${escHtml(record.scan_threat)}</dd>`
+    scanHtml += `<dt>${t('detail.threat')}</dt><dd class="status-error">${escHtml(record.scan_threat)}</dd>`
   }
   if (record?.sandbox_report) {
     try {
       const r = JSON.parse(record.sandbox_report)
       scanHtml += `
-        <dt>Sandbox</dt><dd>${escHtml(r.verdict)}</dd>
-        <dt>Network</dt><dd>${r.network_attempts} attempt(s)</dd>
-        <dt>Writes</dt><dd>${r.file_writes} attempt(s)</dd>
-        <dt>Blocked</dt><dd>${r.syscalls_blocked} syscall(s)</dd>
+        <dt>${t('detail.sandbox')}</dt><dd>${escHtml(r.verdict)}</dd>
+        <dt>${t('detail.network')}</dt><dd>${r.network_attempts} ${t('detail.attempts')}</dd>
+        <dt>${t('detail.writes')}</dt><dd>${r.file_writes} ${t('detail.attempts')}</dd>
+        <dt>${t('detail.blocked')}</dt><dd>${r.syscalls_blocked} ${t('detail.syscalls')}</dd>
       `
     } catch { /* malformed JSON — skip */ }
   }
 
   body.innerHTML = `
     <dl class="detail-list">
-      <dt>File</dt>
+      <dt>${t('detail.file')}</dt>
       <dd title="${escHtml(data.filename)}">${escHtml(data.filename)}</dd>
-      <dt>URL</dt>
+      <dt>${t('detail.url')}</dt>
       <dd class="detail-url" title="${escHtml(data.url)}">${escHtml(data.url)}</dd>
-      <dt>Folder</dt>
+      <dt>${t('detail.folder')}</dt>
       <dd>
         <button class="detail-open-btn" data-path="${escHtml(data.destination)}">
-          Open folder &#8599;
+          ${t('detail.open_folder')}
         </button>
       </dd>
       ${scanHtml}

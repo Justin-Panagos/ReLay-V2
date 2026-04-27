@@ -3,6 +3,7 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   // Serve from src/ so Vite finds index.html there
   root: 'src',
+  publicDir: 'public',
   // Tauri dev server config
   clearScreen: false,
   server: {

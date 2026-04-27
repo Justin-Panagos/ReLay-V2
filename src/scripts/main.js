@@ -36,6 +36,7 @@ import {
 } from './torrent.js'
 import { loadQuarantine } from './quarantine.js'
 import { initSettings } from './settings.js'
+import { loadLocale, t } from './i18n.js'
 import { initCommunity, loadCommunity } from './community.js'
 import { initDeveloper } from './developer.js'
 
@@ -122,6 +123,9 @@ function initQueueDragDrop() {
 }
 
 async function init() {
+  const storedLang = await invoke('get_setting', { key: 'language' }).catch(() => null)
+  await loadLocale(storedLang ?? 'en')
+
   try {
     await invoke('reset_stale_downloads')
   } catch { /* non-fatal */ }
@@ -146,7 +150,7 @@ async function init() {
       if (payload.connected) {
         banner.classList.add('hidden')
       } else {
-        bannerMsg.textContent = payload.message ?? 'ICP network unreachable — licence and pattern updates paused.'
+        bannerMsg.textContent = payload.message ?? t('icp.offline')
         banner.classList.remove('hidden')
       }
     })
@@ -438,11 +442,7 @@ proPrompt.querySelector('.pro-prompt-dismiss')?.addEventListener('click', () => 
 proPrompt.querySelector('.pro-prompt-upgrade')?.addEventListener('click', async () => {
   const email = document.getElementById('pro-email-input')?.value.trim() ?? ''
   if (!email) {
-    // Route to Settings so the user can enter their email first.
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'))
-    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'))
-    document.querySelector('.tab[data-tab="settings"]')?.classList.add('active')
-    document.getElementById('tab-settings')?.classList.add('active')
+    document.getElementById('settings-btn')?.click()
     document.getElementById('pro-email-input')?.focus()
     proPrompt.classList.add('hidden')
     return

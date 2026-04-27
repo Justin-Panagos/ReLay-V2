@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'self'; script-src 'self'; style-src 'self';" />
-  <title>ReLay</title>
+  <title>__MSG_popupTitle__</title>
   <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
@@ -13,35 +13,35 @@
   <!-- Install prompt — shown when the desktop app is not detected -->
   <div id="install-prompt" class="hidden">
     <div class="install-icon">&#8681;</div>
-    <p class="install-title">ReLay not installed</p>
-    <p class="install-sub">Install the desktop app to start managing your downloads.</p>
+    <p class="install-title">__MSG_notInstalledTitle__</p>
+    <p class="install-sub">__MSG_notInstalledSub__</p>
     <a id="install-btn-mac"   class="install-btn hidden" href="#" target="_blank" rel="noopener">
-      Download for macOS
+      __MSG_installMac__
     </a>
     <a id="install-btn-win"   class="install-btn hidden" href="#" target="_blank" rel="noopener">
-      Download for Windows
+      __MSG_installWin__
     </a>
     <a id="install-btn-linux" class="install-btn hidden" href="#" target="_blank" rel="noopener">
-      Download for Linux
+      __MSG_installLinux__
     </a>
   </div>
 
   <!-- Downloads view — shown when connected to the desktop app -->
   <div id="downloads-view">
     <header class="popup-header">
-      <span class="popup-title">ReLay</span>
-      <span id="status-dot" class="dot dot-connected" title="Connected to ReLay"></span>
+      <span class="popup-title">__MSG_popupTitle__</span>
+      <span id="status-dot" class="dot dot-connected" title="__MSG_popupConnected__"></span>
     </header>
 
     <div id="downloads-list">
-      <div id="empty-state" class="empty-state">No active downloads</div>
+      <div id="empty-state" class="empty-state">__MSG_popupNoDownloads__</div>
     </div>
 
     <footer class="popup-footer">
-      <a id="open-app-btn" href="#" class="footer-link">Open ReLay</a>
+      <a id="open-app-btn" href="#" class="footer-link">__MSG_popupOpenApp__</a>
       <label class="footer-toggle" title="Block timed overlays and redirecting close buttons">
         <input type="checkbox" id="popup-block-toggle" checked>
-        <span>Block popups</span>
+        <span>__MSG_popupBlockPopups__</span>
       </label>
     </footer>
   </div>
