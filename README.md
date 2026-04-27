@@ -2,19 +2,26 @@
 
 > Downloads, redefined.
 
-A cross-platform desktop download manager built with Rust and Tauri. ReLay combines fast parallel chunked downloads, full torrent support, and a 7-layer virus scanner (ReLay Shield) backed by a decentralised threat intelligence network on the Internet Computer Protocol (ICP).
+A cross-platform desktop download manager built with Rust and Tauri. ReLay combines fast parallel chunked downloads, full torrent support, smart queue management, and a 7-layer virus scanner (ReLay Shield) backed by a decentralised threat intelligence network on the Internet Computer Protocol (ICP).
 
 ---
 
 ## Features
 
-### Core
+### Core Downloads
 - HTTP/HTTPS downloads with parallel chunking (4 chunks free / 16 Pro)
 - HTTP/2 multiplexing via reqwest
 - Pause, resume, and cancel at any point
+- Per-download bandwidth cap — Pro users can set a live kbps limit per download
+- Auto-retry on network failure — up to 4 attempts with exponential backoff (5s → 10s → 20s → 40s)
 - Magnet link and .torrent file support (DHT + PEX peer discovery)
 - UPnP port forwarding for inbound peer connections (port 6881)
 - Drag-and-drop URLs and .torrent files
+
+### Queue Management
+- Sequential chaining — queued downloads start automatically when a slot opens
+- Drag-and-drop queue reorder (Pro)
+- Time-window scheduling — set a start/end time and downloads pause/resume automatically (Pro)
 
 ### ReLay Shield
 - Layer 1 — Hash reputation (VirusTotal)
@@ -23,7 +30,7 @@ A cross-platform desktop download manager built with Rust and Tauri. ReLay combi
 - Layer 4 — File type mismatch detection
 - Layer 5 — URL/IP reputation
 - Layer 6 — Static binary heuristics
-- Layer 7 — Sandbox behavioural analysis (Pro, opt-in)
+- Layer 7 — Sandbox behavioural analysis — macOS (`sandbox-exec`), Linux (network namespace), Windows (Job Objects) — Pro, opt-in
 
 ### Decentralised Threat Network (ICP)
 - Signature database synced every 12 hours from ICP Pattern Canister
@@ -31,14 +38,22 @@ A cross-platform desktop download manager built with Rust and Tauri. ReLay combi
 - DAO voting for community threat review (Pro, opt-in)
 - Public Threat Intelligence API for developers and researchers
 
+### Browser Extension (Chrome / Firefox)
+- Intercepts downloads and routes them through the desktop app
+- Live download progress in the extension popup
+- Smart popup blocking — suppresses timed overlays and close-button redirect traps
+- Block popups toggle in the extension popup
+
 ### Pro Tier ($5/month)
 - Unlimited simultaneous HTTP downloads
 - 16 parallel chunks per download
-- No speed cap
-- 200 torrent peers
-- Browser extension (Chrome + Firefox)
-- Sandbox scanning
+- Per-download bandwidth limit (live, adjustable mid-download)
+- Drag-and-drop queue reorder
+- Time-window download scheduling
+- Sandbox scanning (Layer 7)
+- Browser extension
 - Download history: 100 entries (vs 3 free)
+- 200 torrent peers
 - ICP Shield DAO voting rights
 
 ---
@@ -54,6 +69,7 @@ A cross-platform desktop download manager built with Rust and Tauri. ReLay combi
 | Torrent engine | librqbit |
 | Local database | SQLite (rusqlite) |
 | Virus scanning | yara-rs, goblin, infer, memmap2, sha2 |
+| Scheduling | chrono |
 | ICP canisters | ic-cdk, ic-agent, candid |
 | Payments | Stripe + Cloudflare Workers |
 | Frontend | HTML + CSS + Vanilla JS |
@@ -70,11 +86,16 @@ A cross-platform desktop download manager built with Rust and Tauri. ReLay combi
 - Node.js 20+
 - Tauri CLI: `cargo install tauri-cli`
 
-**macOS:** Xcode command line tools (`xcode-select --install`)
+**macOS:**
+```bash
+xcode-select --install
+brew install yara
+```
 
 **Linux (Debian/Ubuntu):**
 ```bash
-sudo apt install libwebkit2gtk-4.0-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+sudo apt install libwebkit2gtk-4.0-dev libssl-dev libgtk-3-dev \
+  libayatana-appindicator3-dev librsvg2-dev libyara-dev
 ```
 
 **Windows:** Microsoft C++ Build Tools (Visual Studio installer)
@@ -119,6 +140,7 @@ relay/
 │   ├── governance/     # DAO voting + reputation
 │   ├── identity/       # Pro licences + API keys
 │   └── update/         # App version tracking
+├── worker/             # Cloudflare Worker (payments + API)
 └── extension/          # Browser extension (Chrome + Firefox)
 ```
 
@@ -128,10 +150,10 @@ relay/
 
 ReLay uses UPnP to automatically open an inbound port (6881) on your router, which allows peers to connect to you directly and significantly improves download speeds.
 
-**If speeds are still slow, check the following:**
+**If speeds are still slow:**
 
-- **Strict NAT or corporate firewall** — UPnP won't work. Manually forward TCP/UDP port 6881 on your router to your machine.
-- **macOS firewall** — Allow ReLay through `System Settings → Privacy & Security → Firewall`. Without this, macOS blocks inbound peer connections even if the router is open.
+- **Strict NAT or corporate firewall** — UPnP won't work. Manually forward TCP/UDP port 6881 on your router.
+- **macOS firewall** — Allow ReLay through `System Settings → Privacy & Security → Firewall`.
 - **Router with UPnP disabled** — Enable UPnP in your router admin panel (usually under Advanced → NAT or WAN settings).
 - **Low-seeder torrent** — If the torrent itself has very few seeders, speeds will be limited regardless of network configuration.
 
@@ -149,4 +171,4 @@ ReLay uses UPnP to automatically open an inbound port (6881) on your router, whi
 
 ## Licence
 
-MIT
+Proprietary. All rights reserved.
