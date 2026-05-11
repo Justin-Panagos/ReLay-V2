@@ -15,16 +15,18 @@ const SUSPICIOUS_PATHS: &[&str] = &[
 
 /// Layer 5: URL reputation check.
 /// Checks the download URL host against a hardcoded blocklist of suspicious TLDs/patterns.
-/// If a VirusTotal API key is set, also queries the VT URL report.
+/// If a VirusTotal API key is set, also queries the VT URL report using the shared client.
 /// Returns Suspicious (never Threat) — URL reputation alone is not definitive.
 ///
 /// Args:
-///   ctx:     Scan context (url is used).
-///   vt_key:  Optional VirusTotal API key.
+///   ctx:    Scan context (url is used).
+///   vt_key: Optional VirusTotal API key.
+///   app:    Tauri app handle — used to access the shared reqwest::Client from managed state.
 ///
 /// Returns:
 ///   LayerResult with Suspicious or Clean.
-pub async fn scan(ctx: &ScanContext, vt_key: Option<&str>) -> LayerResult {
+pub async fn scan(ctx: &ScanContext, vt_key: Option<&str>, app: &tauri::AppHandle) -> LayerResult {
+    use tauri::Manager;
     let url = ctx.url.clone();
     let vt_key = vt_key.map(|s| s.to_string());
 
@@ -37,9 +39,13 @@ pub async fn scan(ctx: &ScanContext, vt_key: Option<&str>) -> LayerResult {
         };
     }
 
-    // Optional VT URL lookup.
+    // Optional VT URL lookup — uses the shared client (with connect + total timeout).
     if let Some(key) = vt_key {
-        match check_vt_url(&url, &key).await {
+        let client = app
+            .try_state::<reqwest::Client>()
+            .map(|s| s.inner().clone())
+            .unwrap_or_else(reqwest::Client::new);
+        match check_vt_url(&url, &key, &client).await {
             Ok(Some(reason)) => {
                 return LayerResult {
                     layer: 5,
@@ -85,7 +91,7 @@ fn check_blocklist(url: &str) -> Option<String> {
             .split([':', '?', '#'])
             .next()
             .unwrap_or(host_raw);
-        if host.ends_with(tld) || host.contains(&format!("{tld}/")) {
+        if host.ends_with(tld) {
             return Some(format!("URL uses suspicious TLD: {tld}"));
         }
     }
@@ -105,18 +111,18 @@ fn check_blocklist(url: &str) -> Option<String> {
 /// Args:
 ///   url:     The download URL.
 ///   api_key: VirusTotal API key.
+///   client:  Shared reqwest client with configured timeouts.
 ///
 /// Returns:
 ///   Ok(Some(reason)) if malicious > 3 engines, Ok(None) if clean,
 ///   Err(reason) if VT is unavailable or returns a non-200 status.
-async fn check_vt_url(url: &str, api_key: &str) -> Result<Option<String>, String> {
+async fn check_vt_url(url: &str, api_key: &str, client: &reqwest::Client) -> Result<Option<String>, String> {
     // VT URL id = base64url(url), no padding.
     let mut encoded = Vec::new();
     base64_url_encode(url.as_bytes(), &mut encoded);
     let id = String::from_utf8_lossy(&encoded).replace('=', "");
 
     let vt_url = format!("https://www.virustotal.com/api/v3/urls/{id}");
-    let client = reqwest::Client::new();
     let resp = client
         .get(&vt_url)
         .header("x-apikey", api_key)

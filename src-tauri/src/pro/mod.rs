@@ -64,7 +64,6 @@ pub fn is_pro(cache: &LicenceCacheState) -> bool {
 ///
 /// Returns:
 ///   Ok(()) if Pro, Err with a user-facing message if not.
-#[allow(dead_code)]
 pub fn require_pro(cache: &LicenceCacheState) -> Result<(), String> {
     if is_pro(cache) {
         Ok(())

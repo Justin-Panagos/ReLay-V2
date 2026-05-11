@@ -1,5 +1,5 @@
 use crate::db::{self, DbState};
-use crate::icp::{agent, ConfigState};
+use crate::icp::{agent, ConfigState, DeviceIdentityState};
 use crate::pro::{self, LicenceCacheState};
 use tauri::{Manager, State};
 
@@ -188,6 +188,7 @@ pub async fn recheck_licence(
     cache: State<'_, LicenceCacheState>,
     db: State<'_, DbState>,
     config: State<'_, ConfigState>,
+    identity: State<'_, DeviceIdentityState>,
 ) -> Result<(), String> {
     let device_id = {
         let conn = db.0.lock().map_err(|e| e.to_string())?;
@@ -197,7 +198,7 @@ pub async fn recheck_licence(
     };
 
     let icp = &config.0;
-    let a = agent::build_agent(&icp.icp_url)
+    let a = agent::build_agent(&icp.icp_url, &identity.0)
         .await
         .map_err(|e| e.to_string())?;
     let identity_id =

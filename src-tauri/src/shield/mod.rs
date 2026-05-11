@@ -7,9 +7,14 @@ pub mod layer6_heuristics;
 pub mod layer7_sandbox;
 
 use std::path::Path;
+use std::sync::Mutex;
 
 use crate::db::{self, DbState};
 use tauri::Manager;
+
+/// Tauri-managed state: the active YARA rules string loaded from disk at startup.
+/// Replacing the string at runtime lets rule updates reach users without a binary release.
+pub struct YaraRulesState(pub Mutex<String>);
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -23,6 +28,8 @@ pub struct ScanContext {
     pub filename: String,
     /// Hex-encoded SHA-256 digest. Empty until Layer 1 populates it.
     pub sha256: String,
+    /// Active YARA rules string, cloned from YaraRulesState at scan time.
+    pub yara_rules: String,
 }
 
 /// Verdict returned by a single scan layer.
@@ -115,11 +122,19 @@ pub async fn run_pipeline(
     db_id: i64,
     app: &tauri::AppHandle,
 ) -> PipelineResult {
+    // Load the active rules string once per scan. Falls back to the bundled baseline
+    // if YaraRulesState was not yet managed (e.g. in tests).
+    let yara_rules: String = app
+        .try_state::<YaraRulesState>()
+        .map(|s| s.0.lock().unwrap_or_else(|p| p.into_inner()).clone())
+        .unwrap_or_else(|| layer2_yara::BUNDLED_RULES.to_string());
+
     let mut ctx = ScanContext {
         path: path.to_path_buf(),
         url: url.to_string(),
         filename: filename.to_string(),
         sha256: String::new(),
+        yara_rules,
     };
 
     let mut layers: Vec<LayerResult> = Vec::with_capacity(7);
@@ -176,7 +191,13 @@ pub async fn run_pipeline(
         if vt_key.is_some() && !ctx.sha256.is_empty() {
             let sha256 = ctx.sha256.clone();
             let app_clone = app.clone();
-            tokio::spawn(auto_submit_vt_threat(sha256, app_clone));
+            tokio::spawn(async move {
+                let _ = tokio::time::timeout(
+                    std::time::Duration::from_secs(15),
+                    auto_submit_vt_threat(sha256, app_clone),
+                )
+                .await;
+            });
         }
         let reason = reason.clone();
         layers.push(l1);
@@ -192,7 +213,7 @@ pub async fn run_pipeline(
     run_layer!(2, "YARA", layer2_yara::scan(&ctx));
     run_layer!(3, "Entropy", layer3_entropy::scan(&ctx));
     run_layer!(4, "File Type", layer4_filetype::scan(&ctx));
-    run_layer!(5, "URL Reputation", layer5_url::scan(&ctx, vt_key.as_deref()));
+    run_layer!(5, "URL Reputation", layer5_url::scan(&ctx, vt_key.as_deref(), app));
     run_layer!(6, "Heuristics", layer6_heuristics::scan(&ctx));
 
     // Layer 7: Sandbox — Pro only, opt-in via "sandbox_enabled" = "true" setting.
@@ -243,29 +264,19 @@ pub async fn run_pipeline(
 ///   sha256: Hex-encoded SHA-256 of the file VirusTotal flagged.
 ///   app:    Tauri app handle used to access ConfigState and DbState.
 async fn auto_submit_vt_threat(sha256: String, app: tauri::AppHandle) {
-    use crate::db::{self, DbState};
-    use crate::icp::{agent as icp_agent, ConfigState};
+    use crate::icp::{agent as icp_agent, ConfigState, DeviceIdentityState};
 
     let config = match app.try_state::<ConfigState>() {
         Some(c) => c,
         None => return,
     };
-
-    let device_id = {
-        let db_state = match app.try_state::<DbState>() {
-            Some(d) => d,
-            None => return,
-        };
-        db_state
-            .0
-            .lock()
-            .ok()
-            .and_then(|conn| db::get_setting(&conn, "device_id").ok().flatten())
-            .unwrap_or_else(|| "anonymous".to_string())
-    };
+    let pem = app
+        .try_state::<DeviceIdentityState>()
+        .map(|s| s.0.clone())
+        .unwrap_or_default();
 
     let icp = &config.0;
-    let a = match icp_agent::build_agent(&icp.icp_url).await {
+    let a = match icp_agent::build_agent(&icp.icp_url, &pem).await {
         Ok(a) => a,
         Err(e) => {
             eprintln!("[shield] auto_submit_vt_threat: failed to build IC agent: {e:?}");
@@ -280,7 +291,7 @@ async fn auto_submit_vt_threat(sha256: String, app: tauri::AppHandle) {
         }
     };
 
-    match icp_agent::submit_proposal(&a, &governance_id, sha256.clone(), device_id).await {
+    match icp_agent::submit_proposal(&a, &governance_id, sha256.clone()).await {
         Ok(proposal_id) => eprintln!(
             "[shield] auto_submit_vt_threat: submitted {sha256} as proposal #{proposal_id}"
         ),

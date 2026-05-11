@@ -26,6 +26,8 @@ bundle/
 
 # Chrome extension private key — never commit
 extension/extension_key.pem
+# Chrome-generated compiled ruleset — not needed in source control
+extension/_metadata/
 
 # Environment and secrets
 .env

@@ -1,6 +1,7 @@
 use crate::db::{self, DbState};
 use crate::icp::agent::{self, Proposal};
-use crate::icp::ConfigState;
+use crate::icp::{ConfigState, DeviceIdentityState};
+use crate::pro::{self, LicenceCacheState};
 use tauri::State;
 
 /// Returns the Unix timestamp of the last successful ICP pattern sync and
@@ -24,12 +25,13 @@ pub fn get_pattern_sync_info(db: State<'_, DbState>) -> Result<serde_json::Value
 }
 
 /// Submits a quarantined file's SHA-256 to the governance canister for community review.
-/// Looks up the sha256 from the quarantine table, then calls governance::submit_proposal.
+/// The canister derives the submitter identity from the device's Ed25519 principal.
 ///
 /// Args:
 ///   quarantine_id: Row id from the quarantine table.
 ///   db:            Tauri-managed database state.
 ///   config:        Tauri-managed ICP config state.
+///   identity:      Tauri-managed device identity state (PEM bytes).
 ///
 /// Returns:
 ///   Ok(proposal_id) on success, Err(message) on failure.
@@ -38,27 +40,25 @@ pub async fn submit_zero_day(
     quarantine_id: i64,
     db: State<'_, DbState>,
     config: State<'_, ConfigState>,
+    identity: State<'_, DeviceIdentityState>,
 ) -> Result<u64, String> {
-    // Look up sha256 and device_id — lock, read, release before any await.
-    let (sha256, device_id) = {
+    let sha256 = {
         let conn = db.0.lock().map_err(|e| e.to_string())?;
         let record = db::get_quarantine_by_id(&conn, quarantine_id)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("quarantine entry {quarantine_id} not found"))?;
-        let device_id = db::get_setting(&conn, "device_id")
-            .map_err(|e| e.to_string())?
-            .unwrap_or_else(|| "anonymous".to_string());
-        (record.sha256, device_id)
+        record.sha256
     };
 
+    let pem = identity.0.clone();
     let icp = &config.0;
-    let a = agent::build_agent(&icp.icp_url)
+    let a = agent::build_agent(&icp.icp_url, &pem)
         .await
         .map_err(|e| e.to_string())?;
     let governance_id =
         agent::parse_principal(&icp.canisters.governance).map_err(|e| e.to_string())?;
 
-    agent::submit_proposal(&a, &governance_id, sha256, device_id)
+    agent::submit_proposal(&a, &governance_id, sha256)
         .await
         .map_err(|e| e.to_string())
 }
@@ -66,14 +66,19 @@ pub async fn submit_zero_day(
 /// Returns all governance proposals from the ICP canister.
 ///
 /// Args:
-///   config: Tauri-managed ICP config state.
+///   config:   Tauri-managed ICP config state.
+///   identity: Tauri-managed device identity state (PEM bytes).
 ///
 /// Returns:
 ///   Vec of Proposal on success, Err(message) on failure.
 #[tauri::command]
-pub async fn get_proposals(config: State<'_, ConfigState>) -> Result<Vec<Proposal>, String> {
+pub async fn get_proposals(
+    config: State<'_, ConfigState>,
+    identity: State<'_, DeviceIdentityState>,
+) -> Result<Vec<Proposal>, String> {
+    let pem = identity.0.clone();
     let icp = &config.0;
-    let a = agent::build_agent(&icp.icp_url)
+    let a = agent::build_agent(&icp.icp_url, &pem)
         .await
         .map_err(|e| e.to_string())?;
     let governance_id =
@@ -84,11 +89,12 @@ pub async fn get_proposals(config: State<'_, ConfigState>) -> Result<Vec<Proposa
         .map_err(|e| e.to_string())
 }
 
-/// Returns the reputation score for the current device.
+/// Returns the reputation score for the current device from the governance canister.
 ///
 /// Args:
-///   db:     Tauri-managed database state (used to read device_id from settings).
-///   config: Tauri-managed ICP config state.
+///   db:       Tauri-managed database state (used to read device_id from settings).
+///   config:   Tauri-managed ICP config state.
+///   identity: Tauri-managed device identity state (PEM bytes).
 ///
 /// Returns:
 ///   Ok(score) on success, Err(message) on failure.
@@ -96,6 +102,7 @@ pub async fn get_proposals(config: State<'_, ConfigState>) -> Result<Vec<Proposa
 pub async fn get_reputation(
     db: State<'_, DbState>,
     config: State<'_, ConfigState>,
+    identity: State<'_, DeviceIdentityState>,
 ) -> Result<u64, String> {
     let device_id = {
         let conn = db.0.lock().map_err(|e| e.to_string())?;
@@ -104,8 +111,9 @@ pub async fn get_reputation(
             .unwrap_or_else(|| "anonymous".to_string())
     };
 
+    let pem = identity.0.clone();
     let icp = &config.0;
-    let a = agent::build_agent(&icp.icp_url)
+    let a = agent::build_agent(&icp.icp_url, &pem)
         .await
         .map_err(|e| e.to_string())?;
     let governance_id =
@@ -117,37 +125,35 @@ pub async fn get_reputation(
 }
 
 /// Casts an approve or reject vote on a pending governance proposal.
+/// The canister derives the voter identity from the device's Ed25519 principal.
 ///
 /// Args:
 ///   proposal_id: The proposal to vote on.
 ///   approve:     true to approve, false to reject.
-///   db:          Tauri-managed database state (used to read device_id from settings).
 ///   config:      Tauri-managed ICP config state.
+///   identity:    Tauri-managed device identity state (PEM bytes).
+///   cache:       Tauri-managed in-memory licence cache.
 ///
 /// Returns:
-///   Ok(()) on success, Err(message) on failure.
+///   Ok(()) on success, Err("Pro subscription required") if not Pro, Err(message) on failure.
 #[tauri::command]
 pub async fn vote_proposal(
     proposal_id: u64,
     approve: bool,
-    db: State<'_, DbState>,
     config: State<'_, ConfigState>,
+    identity: State<'_, DeviceIdentityState>,
+    cache: State<'_, LicenceCacheState>,
 ) -> Result<(), String> {
-    let device_id = {
-        let conn = db.0.lock().map_err(|e| e.to_string())?;
-        db::get_setting(&conn, "device_id")
-            .map_err(|e| e.to_string())?
-            .unwrap_or_else(|| "anonymous".to_string())
-    };
-
+    pro::require_pro(&cache)?;
+    let pem = identity.0.clone();
     let icp = &config.0;
-    let a = agent::build_agent(&icp.icp_url)
+    let a = agent::build_agent(&icp.icp_url, &pem)
         .await
         .map_err(|e| e.to_string())?;
     let governance_id =
         agent::parse_principal(&icp.canisters.governance).map_err(|e| e.to_string())?;
 
-    agent::vote(&a, &governance_id, proposal_id, device_id, approve)
+    agent::vote(&a, &governance_id, proposal_id, approve)
         .await
         .map_err(|e| e.to_string())
 }

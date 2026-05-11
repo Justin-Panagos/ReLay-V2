@@ -80,14 +80,14 @@ thread_local! {
     );
 }
 
-/// Increments and returns the next proposal id.
+/// Increments and returns the next proposal id. IDs start at 1 — 0 is reserved
+/// as a sentinel for "not set" in client code.
 fn next_proposal_id() -> u64 {
     NEXT_ID.with(|m| {
         let mut map = m.borrow_mut();
-        let current = map.get(&0u8).unwrap_or(0);
-        let next = current + 1;
+        let next = map.get(&0u8).unwrap_or(0) + 1;
         map.insert(0u8, next);
-        current
+        next
     })
 }
 
@@ -104,16 +104,17 @@ fn increment_reputation(device_id: &str) {
 }
 
 /// Submits a hash for community review and returns the new proposal id.
+/// Submitter identity is derived from ic_cdk::caller() — cannot be spoofed.
 /// Rewards the submitter with +1 reputation.
 ///
 /// Args:
-///   sha256:    Hex-encoded SHA-256 hash of the file to review.
-///   submitter: device_id of the submitting user.
+///   sha256: Hex-encoded SHA-256 hash of the file to review.
 ///
 /// Returns:
 ///   nat64 — id of the newly created proposal.
 #[ic_cdk::update]
-fn submit_proposal(sha256: String, submitter: String) -> u64 {
+fn submit_proposal(sha256: String) -> u64 {
+    let submitter = ic_cdk::caller().to_text();
     let id = next_proposal_id();
     let proposal = Proposal {
         id,
@@ -130,22 +131,25 @@ fn submit_proposal(sha256: String, submitter: String) -> u64 {
 }
 
 /// Casts a vote on a pending proposal.
-/// Silently ignores duplicate votes from the same voter on the same proposal.
+/// Voter identity is derived from ic_cdk::caller() — cannot be spoofed.
+/// Returns Err if the caller has already voted on this proposal so the caller
+/// can distinguish a successful vote from a no-op.
 /// Auto-resolves the proposal when approve or reject votes reach VOTE_THRESHOLD.
 /// Rewards the voter with +1 reputation.
 ///
 /// Args:
 ///   proposal_id: Id of the proposal to vote on.
-///   voter:       device_id of the voting user.
 ///   approve:     true to approve, false to reject.
+///
+/// Returns:
+///   Ok(()) on success, Err(message) if the caller already voted on this proposal.
 #[ic_cdk::update]
-fn vote(proposal_id: u64, voter: String, approve: bool) {
+fn vote(proposal_id: u64, approve: bool) -> Result<(), String> {
+    let voter = ic_cdk::caller().to_text();
     let dedup_key = format!("{proposal_id}:{voter}");
 
-    // Silently ignore duplicate votes.
-    let already_voted = VOTES.with(|m| m.borrow().get(&dedup_key).is_some());
-    if already_voted {
-        return;
+    if VOTES.with(|m| m.borrow().get(&dedup_key).is_some()) {
+        return Err(format!("already voted on proposal {proposal_id}"));
     }
 
     VOTES.with(|m| m.borrow_mut().insert(dedup_key, true));
@@ -172,6 +176,7 @@ fn vote(proposal_id: u64, voter: String, approve: bool) {
     });
 
     increment_reputation(&voter);
+    Ok(())
 }
 
 /// Returns all proposals in the order they were submitted.

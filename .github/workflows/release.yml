@@ -11,7 +11,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
+          - os: macos-latest       # Apple Silicon
+            target: aarch64-apple-darwin
+          - os: macos-13           # Intel Mac (last Intel runner on GitHub)
             target: x86_64-apple-darwin
           - os: windows-latest
             target: x86_64-pc-windows-msvc
@@ -35,7 +37,7 @@ jobs:
           cache: npm
 
       - name: Install YARA (macOS)
-        if: matrix.os == 'macos-latest'
+        if: startsWith(matrix.os, 'macos')
         run: brew install yara
 
       - name: Install YARA (Linux)
@@ -63,9 +65,15 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+          # yara-sys bindgen needs the YARA headers on macOS
+          YARA_LIBRARY_PATH: ${{ startsWith(matrix.os, 'macos') && '/opt/homebrew/lib' || '' }}
+          BINDGEN_EXTRA_CLANG_ARGS: ${{ startsWith(matrix.os, 'macos') && '-I/opt/homebrew/include' || '' }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: ReLay ${{ github.ref_name }}
           releaseBody: See CHANGELOG.md for details.
           releaseDraft: true
           prerelease: false
+          args: --target ${{ matrix.target }}

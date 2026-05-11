@@ -363,7 +363,7 @@ async function handleInitCheckout(request, env) {
     body: JSON.stringify({
       email,
       plan: env.PAYSTACK_PRO_PLAN,
-      currency: 'ZAR',
+      currency: 'USD',
       metadata: { device_id, type: 'pro' },
       callback_url: `${new URL(request.url).origin}/api/callback`,
     }),
@@ -407,8 +407,8 @@ async function handleSnapshotCheckout(request, env) {
     },
     body: JSON.stringify({
       email,
-      amount: 50000, // ZAR cents — R500
-      currency: 'ZAR',
+      amount: 1000, // USD cents — $10
+      currency: 'USD',
       metadata: { type: 'snapshot' },
       callback_url: `${workerOrigin}/api/callback`,
     }),
@@ -442,7 +442,7 @@ async function handleApiCheckout(request, env) {
   const { plan, email } = body
   if (!email) return new Response('missing email', { status: 400 })
 
-  const amount   = plan === 'monthly' ? 800000 : null
+  const amount   = plan === 'monthly' ? 1500 : null // USD cents — $15/month
   const planCode = plan === 'monthly' ? env.PAYSTACK_DEVELOPER_PLAN : null
   if (!amount || !planCode) return new Response('invalid plan — use monthly', { status: 400 })
 
@@ -456,7 +456,7 @@ async function handleApiCheckout(request, env) {
     body: JSON.stringify({
       email,
       amount,
-      currency: 'ZAR',
+      currency: 'USD',
       plan: planCode,
       metadata: { type: 'api_key', plan },
       callback_url: `${workerOrigin}/api/callback`,

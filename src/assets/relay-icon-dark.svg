@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="ReLay">
+  <title>ReLay icon (dark)</title>
+  <desc>ReLay app launcher icon, dark variant, with rounded square background.</desc>
+  <rect width="512" height="512" rx="96" ry="96" fill="#1a1a1a"/>
+  <g transform="translate(256,256) scale(1.95)">
+    <polygon points="0,-100 87,-50 87,50 0,100 -87,50 -87,-50"
+             fill="none" stroke="#c84e2c" stroke-width="3" stroke-linejoin="round"/>
+    <polygon points="0,-100 -87,-50 0,0"
+             fill="#c84e2c" stroke="#c84e2c" stroke-width="3" stroke-linejoin="round"/>
+    <polygon points="0,-100 87,-50 0,0"
+             fill="#c84e2c" stroke="#c84e2c" stroke-width="3" stroke-linejoin="round"/>
+    <line x1="0" y1="-100" x2="0" y2="0" stroke="#1a1a1a" stroke-width="2.5"/>
+    <circle cx="0" cy="-19" r="4" fill="#1a1a1a"/>
+    <g stroke="#c84e2c" stroke-width="1.75" stroke-opacity="0.8" fill="none" stroke-linecap="round">
+      <line x1="0" y1="8" x2="0" y2="74"/>
+      <line x1="8" y1="4" x2="64" y2="37"/>
+      <line x1="-8" y1="4" x2="-38" y2="22"/>
+    </g>
+    <circle cx="32" cy="18" r="2.75" fill="#c84e2c"/>
+    <g fill="#c84e2c">
+      <circle cx="0" cy="-100" r="7"/>
+      <circle cx="87" cy="-50" r="7"/>
+      <circle cx="87" cy="50" r="7"/>
+      <circle cx="0" cy="100" r="7"/>
+      <circle cx="-87" cy="50" r="7"/>
+      <circle cx="-87" cy="-50" r="7"/>
+    </g>
+  </g>
+</svg>

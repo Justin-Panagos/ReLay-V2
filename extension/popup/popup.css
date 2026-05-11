@@ -14,7 +14,7 @@
   --text:         #1a1a1a;
   --text-muted:   #6b6b6b;
   --border:       #e0e0e0;
-  --accent:       #0D9488;
+  --accent:       #c84e2c;
   --accent-green: #059669;
   --accent-red:   #dc2626;
   --radius:       6px;
@@ -28,7 +28,7 @@
     --text:         #ffffff;
     --text-muted:   #888888;
     --border:       #3a3a3a;
-    --accent:       #0D9488;
+    --accent:       #c84e2c;
     --accent-green: #10b981;
     --accent-red:   #ef4444;
   }

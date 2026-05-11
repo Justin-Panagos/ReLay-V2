@@ -81,9 +81,18 @@
 }
 
 #app-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   font-size: 13px;
   font-weight: 600;
-  letter-spacing: 0.05em;
+  letter-spacing: 0;
+}
+
+#app-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
 }
 
 #app-bar-actions {

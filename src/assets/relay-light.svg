@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="500" viewBox="0 0 400 500" role="img" aria-label="ReLay — Secure Download Mesh">
+  <title>ReLay</title>
+  <desc>ReLay logo, light mode. A hexagonal mesh with a filled upper wedge, a vertical seam, a light center node, and three radiating bottom lines.</desc>
+
+  <!-- Background -->
+  <rect width="400" height="500" fill="#ffffff"/>
+
+  <!-- Mark -->
+  <g transform="translate(200,200)">
+    <polygon points="0,-100 87,-50 87,50 0,100 -87,50 -87,-50"
+             fill="none" stroke="#c84e2c" stroke-width="3" stroke-linejoin="round"/>
+    <polygon points="0,-100 -87,-50 0,0"
+             fill="#c84e2c" stroke="#c84e2c" stroke-width="3" stroke-linejoin="round"/>
+    <polygon points="0,-100 87,-50 0,0"
+             fill="#c84e2c" stroke="#c84e2c" stroke-width="3" stroke-linejoin="round"/>
+    <line x1="0" y1="-100" x2="0" y2="0" stroke="#ffffff" stroke-width="2.5"/>
+    <circle cx="0" cy="-19" r="4" fill="#ffffff"/>
+    <g stroke="#c84e2c" stroke-width="1.75" stroke-opacity="0.8" fill="none" stroke-linecap="round">
+      <line x1="0" y1="8" x2="0" y2="74"/>
+      <line x1="8" y1="4" x2="64" y2="37"/>
+      <line x1="-8" y1="4" x2="-38" y2="22"/>
+    </g>
+    <circle cx="32" cy="18" r="2.75" fill="#c84e2c"/>
+    <g fill="#c84e2c">
+      <circle cx="0" cy="-100" r="7"/>
+      <circle cx="87" cy="-50" r="7"/>
+      <circle cx="87" cy="50" r="7"/>
+      <circle cx="0" cy="100" r="7"/>
+      <circle cx="-87" cy="50" r="7"/>
+      <circle cx="-87" cy="-50" r="7"/>
+    </g>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="200" y="395" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="40" font-weight="500" fill="#1a1a1a">Re<tspan fill="#c84e2c">L</tspan>ay</text>
+
+  <!-- Tagline -->
+  <text x="200" y="425" text-anchor="middle"
+        font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace"
+        font-size="11" fill="#888888" letter-spacing="3">SECURE DOWNLOAD MESH</text>
+</svg>

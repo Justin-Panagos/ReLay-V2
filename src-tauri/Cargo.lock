@@ -537,6 +537,9 @@ name = "bytes"
 version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "cached"
@@ -2380,6 +2383,7 @@ dependencies = [
  "k256",
  "leb128",
  "p256",
+ "pem",
  "pkcs8",
  "rand 0.8.5",
  "rangemap",
@@ -3292,6 +3296,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 
 [[package]]
+name = "minisign-verify"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22f9645cb765ea72b8111f36c522475d2daa0d22c957a9826437e97534bc4e9e"
+
+[[package]]
 name = "miniz_oxide"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3794,6 +3804,16 @@ name = "peeking_take_while"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19b17cddbe7ec3f8bc800887bab5e717348c95ea2ca0b1bf0837fb964dc67099"
+
+[[package]]
+name = "pem"
+version = "3.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d30c53c26bc5b31a98cd02d20f25a7c8567146caf63ed593a9d87b2775291be"
+dependencies = [
+ "base64 0.22.1",
+ "serde_core",
+]
 
 [[package]]
 name = "pem-rfc7468"
@@ -4504,6 +4524,7 @@ name = "relay"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "candid",
  "dirs",
  "goblin",
@@ -4512,6 +4533,7 @@ dependencies = [
  "librqbit",
  "memmap2",
  "reqwest 0.11.27",
+ "ring",
  "rusqlite",
  "rusqlite_migration",
  "serde",
@@ -5531,6 +5553,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ae1f57c291a6ab8e1d2e6b8ad0a35ff769c9925deb8a89de85425ff08762d0c"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
+ "bytes",
  "cocoa",
  "dirs-next",
  "dunce",
@@ -5545,7 +5569,10 @@ dependencies = [
  "heck 0.5.0",
  "http 0.2.12",
  "ignore",
+ "indexmap 1.9.3",
+ "infer 0.13.0",
  "log",
+ "minisign-verify",
  "nix",
  "notify-rust",
  "objc",
@@ -5556,6 +5583,7 @@ dependencies = [
  "rand 0.8.5",
  "raw-window-handle",
  "regex",
+ "reqwest 0.11.27",
  "rfd",
  "semver",
  "serde",
@@ -5570,12 +5598,14 @@ dependencies = [
  "tauri-utils",
  "tempfile",
  "thiserror 1.0.69",
+ "time",
  "tokio",
  "url",
  "uuid",
  "webkit2gtk",
  "webview2-com",
  "windows 0.39.0",
+ "zip",
 ]
 
 [[package]]
@@ -7536,6 +7566,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "zip"
+version = "0.6.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "760394e246e4c28189f19d488c058bf16f564016aefac5d32bb1f3b51d5e9261"
+dependencies = [
+ "byteorder",
+ "crc32fast",
+ "crossbeam-utils",
 ]
 
 [[package]]

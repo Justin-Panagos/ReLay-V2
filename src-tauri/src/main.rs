@@ -12,8 +12,9 @@ mod torrent;
 
 use db::DbState;
 use download::lifecycle::{LifecycleState, QueueState};
-use icp::ConfigState;
+use icp::{ConfigState, DeviceIdentityState};
 use pro::{LicenceCache, LicenceCacheState};
+use shield::YaraRulesState;
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -34,11 +35,7 @@ fn main() {
             let dir = match app.path_resolver().app_data_dir() {
                 Some(d) => d,
                 None => {
-                    tauri::api::dialog::blocking::message(
-                        None::<&tauri::Window>,
-                        "Startup Error",
-                        "Could not resolve the app data directory.",
-                    );
+                    eprintln!("[relay] FATAL: could not resolve app data directory");
                     return Err("app data dir unavailable".into());
                 }
             };
@@ -46,11 +43,7 @@ fn main() {
             let conn = match db::init_db(dir.clone()) {
                 Ok(c) => c,
                 Err(msg) => {
-                    tauri::api::dialog::blocking::message(
-                        None::<&tauri::Window>,
-                        "Database Error",
-                        msg,
-                    );
+                    eprintln!("[relay] FATAL: database init failed: {msg}");
                     std::process::exit(1);
                 }
             };
@@ -58,11 +51,30 @@ fn main() {
             let icp_config = match icp::config::load_config(&dir) {
                 Ok(cfg) => cfg,
                 Err(msg) => {
-                    tauri::api::dialog::blocking::message(
-                        None::<&tauri::Window>,
-                        "Configuration Error",
-                        msg,
-                    );
+                    eprintln!("[relay] FATAL: config load failed: {msg}");
+                    std::process::exit(1);
+                }
+            };
+
+            // YARA rules: copy the bundled baseline to the app data dir on first launch.
+            // Subsequent launches load from disk, so rules can be updated independently
+            // of binary releases by replacing this file.
+            let yara_rules_path = dir.join("yara_rules.yar");
+            if !yara_rules_path.exists() {
+                if let Err(e) = std::fs::write(&yara_rules_path, shield::layer2_yara::BUNDLED_RULES) {
+                    eprintln!("[relay] failed to seed yara_rules.yar: {e}");
+                }
+            }
+            let yara_rules_content = std::fs::read_to_string(&yara_rules_path)
+                .unwrap_or_else(|_| shield::layer2_yara::BUNDLED_RULES.to_string());
+
+            // Device Ed25519 identity: load from disk or generate on first launch.
+            // Fatal if the identity cannot be persisted — a non-stable principal corrupts
+            // governance history and reputation across restarts.
+            let pem = match icp::agent::load_or_create_identity(&dir) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("[relay] FATAL: cannot persist device identity: {e}");
                     std::process::exit(1);
                 }
             };
@@ -87,17 +99,14 @@ fn main() {
                         enable_upnp_port_forwarding: true,
                         listen_port_range: Some(6881..6891),
                         defer_writes_up_to: Some(32),
+                        disable_dht_persistence: true,
                         ..Default::default()
                     },
                 ),
             ) {
                 Ok(s) => s,
                 Err(e) => {
-                    tauri::api::dialog::blocking::message(
-                        None::<&tauri::Window>,
-                        "Startup Error",
-                        format!("Failed to initialise torrent session: {e}"),
-                    );
+                    eprintln!("[relay] FATAL: torrent session init failed: {e}");
                     return Err(e.into());
                 }
             };
@@ -115,10 +124,13 @@ fn main() {
                 .and_then(|v| v.parse::<u64>().ok())
                 .unwrap_or(0);
 
+            app.manage(YaraRulesState(Mutex::new(yara_rules_content)));
+            app.manage(DeviceIdentityState(pem));
             app.manage(ConfigState(icp_config.clone()));
             app.manage(
                 reqwest::Client::builder()
                     .connect_timeout(std::time::Duration::from_secs(10))
+                    .timeout(std::time::Duration::from_secs(15))
                     .build()
                     .unwrap_or_else(|_| reqwest::Client::new()),
             );

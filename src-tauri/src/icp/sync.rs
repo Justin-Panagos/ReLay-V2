@@ -4,7 +4,7 @@ use tauri::Manager;
 
 use crate::db::{self, DbState};
 use crate::icp::agent::{self, IcpError, LicenceStatus};
-use crate::icp::AppConfig;
+use crate::icp::{AppConfig, DeviceIdentityState};
 use crate::pro::{self, LicenceCacheState};
 
 /// Runs once at app startup:
@@ -45,8 +45,14 @@ pub async fn run_startup(app: tauri::AppHandle, config: AppConfig) {
         }
     };
 
+    // Load the device identity PEM — empty slice falls back to AnonymousIdentity inside build_agent.
+    let pem = app
+        .try_state::<DeviceIdentityState>()
+        .map(|s| s.0.clone())
+        .unwrap_or_default();
+
     // Build agent — if this fails the ICP network is unreachable; log and skip all ICP calls.
-    let agent = match agent::build_agent(&config.icp_url).await {
+    let agent = match agent::build_agent(&config.icp_url, &pem).await {
         Ok(a) => a,
         Err(e) => {
             eprintln!("[icp] could not build agent: {e}");
@@ -159,7 +165,11 @@ async fn sync_patterns_once(app: &tauri::AppHandle, config: &AppConfig) -> Resul
             .unwrap_or(0)
     };
 
-    let agent = agent::build_agent(&config.icp_url).await?;
+    let pem = app
+        .try_state::<DeviceIdentityState>()
+        .map(|s| s.0.clone())
+        .unwrap_or_default();
+    let agent = agent::build_agent(&config.icp_url, &pem).await?;
     let pattern_id =
         agent::parse_principal(&config.canisters.pattern)?;
 

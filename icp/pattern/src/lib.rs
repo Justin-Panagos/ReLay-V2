@@ -104,7 +104,7 @@ fn get_delta_since(since_id: u64) -> Vec<PatternEntry> {
 }
 
 /// Appends a new pattern entry to the ledger and returns its assigned id.
-/// NOTE: no caller check in Phase 10 — Phase 13 will add an API key gate.
+/// Caller must be a canister controller (the Cloudflare Worker's authorised principal).
 ///
 /// Args:
 ///   sha256:       Hex-encoded SHA-256 hash of the flagged file.
@@ -115,6 +115,10 @@ fn get_delta_since(since_id: u64) -> Vec<PatternEntry> {
 ///   nat64 — the id assigned to the new entry.
 #[ic_cdk::update]
 fn submit_pattern(sha256: String, threat_level: String, source: String) -> u64 {
+    assert!(
+        ic_cdk::api::is_controller(&ic_cdk::caller()),
+        "submit_pattern: caller is not a controller"
+    );
     LEDGER.with(|v| {
         let ledger = v.borrow_mut();
         let id = ledger.len();
@@ -130,23 +134,41 @@ fn submit_pattern(sha256: String, threat_level: String, source: String) -> u64 {
     })
 }
 
-/// Returns every entry in the ledger in ascending id order.
-/// Used by the Cloudflare Worker to service snapshot export requests.
-/// The Worker gates access via snapshot token validation before calling this.
-/// Access level intentionally matches get_delta_since — both are public queries.
+/// Maximum entries per paginated export page.
+/// Keeps each response comfortably below the ICP 2 MB query limit.
+const PAGE_SIZE: u64 = 1_000;
+
+/// Returns a page of entries starting at `offset`, plus a `has_more` flag.
+/// Callers must iterate pages until `has_more` is false to get the full ledger.
+/// Used by the Cloudflare Worker for snapshot export; the Worker validates the
+/// snapshot token before calling this.
 ///
-/// Known scaling limit: ICP query responses cap at ~2 MB. At max_size 512 bytes
-/// per PatternEntry that is approximately 4,000 entries. Add pagination if needed.
+/// Args:
+///   offset: First entry id to include in this page (0 for the first page).
 ///
 /// Returns:
-///   vec PatternEntry — all entries from id 0 to the latest, in ascending order.
+///   (vec PatternEntry, bool has_more) — up to PAGE_SIZE entries and whether more exist.
 #[ic_cdk::query]
-fn get_full_export() -> Vec<PatternEntry> {
+fn get_export_page(offset: u64) -> (Vec<PatternEntry>, bool) {
     LEDGER.with(|v| {
         let ledger = v.borrow();
         let len = ledger.len();
-        (0..len).filter_map(|i| ledger.get(i)).collect()
+        let end = (offset + PAGE_SIZE).min(len);
+        let entries = (offset..end).filter_map(|i| ledger.get(i)).collect();
+        let has_more = end < len;
+        (entries, has_more)
     })
+}
+
+/// Returns the first page of entries for backward compatibility.
+/// Deprecated: use `get_export_page(offset)` for ledgers larger than 1 000 entries.
+///
+/// Returns:
+///   vec PatternEntry — the first PAGE_SIZE entries (or all if fewer exist).
+#[ic_cdk::query]
+fn get_full_export() -> Vec<PatternEntry> {
+    let (entries, _) = get_export_page(0);
+    entries
 }
 
 ic_cdk::export_candid!();

@@ -37,6 +37,7 @@ import {
 import { loadQuarantine } from './quarantine.js'
 import { initSettings } from './settings.js'
 import { loadLocale, t } from './i18n.js'
+import { applyTheme, updateAppIcon } from './theme.js'
 import { initCommunity, loadCommunity } from './community.js'
 import { initDeveloper } from './developer.js'
 
@@ -374,21 +375,7 @@ async function loadPausedDownloads() {
 
 // ── Theme ─────────────────────────────────────────────────────────────────────
 
-/**
- * Applies the given theme to the document root.
- * "auto" removes the data-theme attribute so CSS @media prefers-color-scheme takes over.
- * "light" or "dark" set the attribute to force the chosen scheme.
- *
- * Args:
- *   theme: "auto" | "light" | "dark"
- */
-export function applyTheme(theme) {
-  if (theme === 'auto') {
-    document.documentElement.removeAttribute('data-theme')
-  } else {
-    document.documentElement.setAttribute('data-theme', theme)
-  }
-}
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', updateAppIcon)
 
 invoke('get_setting', { key: 'theme' }).then(t => applyTheme(t ?? 'auto')).catch(() => {})
 

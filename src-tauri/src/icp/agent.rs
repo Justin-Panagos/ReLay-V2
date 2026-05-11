@@ -1,6 +1,10 @@
+use base64::Engine;
 use candid::{CandidType, Decode, Encode};
-use ic_agent::{identity::AnonymousIdentity, Agent};
+use ic_agent::{identity::BasicIdentity, Agent};
 pub use ic_agent::export::Principal;
+use ring::rand::SystemRandom;
+use ring::signature::Ed25519KeyPair;
+use std::path::Path;
 
 // ── Error type ────────────────────────────────────────────────────────────────
 
@@ -8,10 +12,14 @@ pub use ic_agent::export::Principal;
 pub enum IcpError {
     #[error("agent error: {0}")]
     Agent(#[from] ic_agent::AgentError),
-    #[error("candid error: {0}")]
+    #[error("candid encode error: {0}")]
+    Encode(String),
+    #[error("candid decode error: {0}")]
     Decode(String),
     #[error("principal error: {0}")]
     Principal(String),
+    #[error("identity error: {0}")]
+    Identity(String),
 }
 
 // ── Mirror types ──────────────────────────────────────────────────────────────
@@ -45,21 +53,84 @@ pub struct Proposal {
     pub created_at: u64,
 }
 
+// ── Device identity ───────────────────────────────────────────────────────────
+
+/// Loads the device identity PEM from `{app_data_dir}/device_identity.pem`.
+/// Creates and persists a new Ed25519 keypair on first launch.
+/// Returns the raw PEM bytes — callers pass these to `build_agent`.
+///
+/// Args:
+///   app_data_dir: The application data directory path.
+///
+/// Returns:
+///   Ok(pem_bytes) on success.
+///   Err if the identity file cannot be written on first launch (disk full, read-only fs).
+///   Reading an existing file is best-effort; a corrupt file triggers regeneration.
+pub fn load_or_create_identity(app_data_dir: &Path) -> Result<Vec<u8>, String> {
+    let path = app_data_dir.join("device_identity.pem");
+    if path.exists() {
+        if let Ok(bytes) = std::fs::read(&path) {
+            if !bytes.is_empty() {
+                return Ok(bytes);
+            }
+        }
+    }
+    generate_and_persist_identity(&path)
+}
+
+/// Generates a fresh Ed25519 keypair, writes it as a PKCS8 PEM to `path`, and returns
+/// the PEM bytes. Returns Err if the file cannot be written — the caller must treat this
+/// as a fatal startup error so the device principal is stable across restarts.
+///
+/// Args:
+///   path: Destination file path for the PEM.
+///
+/// Returns:
+///   Ok(pem_bytes) on success, Err(message) if the file cannot be persisted.
+fn generate_and_persist_identity(path: &Path) -> Result<Vec<u8>, String> {
+    let rng = SystemRandom::new();
+    let pkcs8 = Ed25519KeyPair::generate_pkcs8(&rng)
+        .expect("Ed25519 key generation failed");
+    let pem = format!(
+        "-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----\n",
+        base64::engine::general_purpose::STANDARD.encode(pkcs8.as_ref())
+    );
+    let pem_bytes = pem.into_bytes();
+    std::fs::write(path, &pem_bytes)
+        .map_err(|e| format!("cannot persist device identity to {}: {e}", path.display()))?;
+    Ok(pem_bytes)
+}
+
 // ── Agent construction ────────────────────────────────────────────────────────
 
-/// Builds an ic-agent pointed at the given ICP network URL.
-/// Uses AnonymousIdentity for all Phase 11 calls.
+/// Builds an ic-agent using the device's Ed25519 identity.
+/// Uses AnonymousIdentity only when `pem` is empty (legitimate pre-startup state).
+/// Returns Err(IcpError::Identity) if a non-empty PEM cannot be parsed — callers surface
+/// this to the frontend via the existing icp://status event so the user is informed.
 /// Fetches the root key only for local replicas (127.0.0.1 / localhost).
 ///
 /// Args:
 ///   icp_url: The IC network URL ("https://ic0.app" or "http://127.0.0.1:4943").
+///   pem:     PEM bytes from `load_or_create_identity`, or empty for anonymous.
 ///
 /// Returns:
-///   A configured Agent ready to make calls.
-pub async fn build_agent(icp_url: &str) -> Result<Agent, IcpError> {
+///   Ok(Agent) on success, Err(IcpError::Identity) if a non-empty PEM is malformed.
+pub async fn build_agent(icp_url: &str, pem: &[u8]) -> Result<Agent, IcpError> {
+    let identity: Box<dyn ic_agent::Identity> = if pem.is_empty() {
+        Box::new(ic_agent::identity::AnonymousIdentity)
+    } else {
+        match BasicIdentity::from_pem(pem) {
+            Ok(id) => Box::new(id),
+            Err(e) => {
+                return Err(IcpError::Identity(format!(
+                    "device PEM invalid — governance calls require a valid identity: {e}"
+                )));
+            }
+        }
+    };
     let agent = Agent::builder()
         .with_url(icp_url)
-        .with_identity(AnonymousIdentity)
+        .with_boxed_identity(identity)
         .build()?;
     if icp_url.contains("127.0.0.1") || icp_url.contains("localhost") {
         agent.fetch_root_key().await?;
@@ -83,9 +154,9 @@ pub fn parse_principal(id: &str) -> Result<Principal, IcpError> {
 /// Returns all pattern entries with id > since_id (delta sync).
 ///
 /// Args:
-///   agent:      Configured IC agent.
-///   canister:   Pattern canister Principal.
-///   since_id:   Last synced pattern id (0 on first sync).
+///   agent:    Configured IC agent.
+///   canister: Pattern canister Principal.
+///   since_id: Last synced pattern id (0 on first sync).
 ///
 /// Returns:
 ///   Vec of PatternEntry ordered by id ascending.
@@ -94,7 +165,7 @@ pub async fn get_delta_since(
     canister: &Principal,
     since_id: u64,
 ) -> Result<Vec<PatternEntry>, IcpError> {
-    let arg = Encode!(&since_id).map_err(|e| IcpError::Decode(e.to_string()))?;
+    let arg = Encode!(&since_id).map_err(|e| IcpError::Encode(e.to_string()))?;
     let raw = agent
         .query(canister, "get_delta_since")
         .with_arg(arg)
@@ -112,13 +183,13 @@ pub async fn get_delta_since(
 /// Args:
 ///   agent:     Configured IC agent.
 ///   canister:  Identity canister Principal.
-///   device_id: UUID v4 string identifying this installation.
+///   device_id: UUID v4 string identifying this installation (customer record key).
 pub async fn register_device(
     agent: &Agent,
     canister: &Principal,
     device_id: String,
 ) -> Result<(), IcpError> {
-    let arg = Encode!(&device_id).map_err(|e| IcpError::Decode(e.to_string()))?;
+    let arg = Encode!(&device_id).map_err(|e| IcpError::Encode(e.to_string()))?;
     agent
         .update(canister, "register_device")
         .with_arg(arg)
@@ -141,7 +212,7 @@ pub async fn check_licence(
     canister: &Principal,
     device_id: String,
 ) -> Result<LicenceStatus, IcpError> {
-    let arg = Encode!(&device_id).map_err(|e| IcpError::Decode(e.to_string()))?;
+    let arg = Encode!(&device_id).map_err(|e| IcpError::Encode(e.to_string()))?;
     let raw = agent
         .query(canister, "check_licence")
         .with_arg(arg)
@@ -166,7 +237,7 @@ pub async fn get_proposals(
     agent: &Agent,
     canister: &Principal,
 ) -> Result<Vec<Proposal>, IcpError> {
-    let arg = Encode!().map_err(|e| IcpError::Decode(e.to_string()))?;
+    let arg = Encode!().map_err(|e| IcpError::Encode(e.to_string()))?;
     let raw = agent
         .query(canister, "get_proposals")
         .with_arg(arg)
@@ -191,7 +262,7 @@ pub async fn get_reputation(
     canister: &Principal,
     device_id: String,
 ) -> Result<u64, IcpError> {
-    let arg = Encode!(&device_id).map_err(|e| IcpError::Decode(e.to_string()))?;
+    let arg = Encode!(&device_id).map_err(|e| IcpError::Encode(e.to_string()))?;
     let raw = agent
         .query(canister, "get_reputation")
         .with_arg(arg)
@@ -202,12 +273,12 @@ pub async fn get_reputation(
 }
 
 /// Submits a community proposal to flag a SHA-256 hash as a threat.
+/// The canister derives the submitter identity from ic_cdk::caller().
 ///
 /// Args:
-///   agent:     Configured IC agent.
-///   canister:  Governance canister Principal.
-///   sha256:    Hex-encoded SHA-256 of the suspect file.
-///   submitter: device_id of the submitting user.
+///   agent:    Configured IC agent (must use the device Ed25519 identity).
+///   canister: Governance canister Principal.
+///   sha256:   Hex-encoded SHA-256 of the suspect file.
 ///
 /// Returns:
 ///   The assigned proposal id.
@@ -215,10 +286,8 @@ pub async fn submit_proposal(
     agent: &Agent,
     canister: &Principal,
     sha256: String,
-    submitter: String,
 ) -> Result<u64, IcpError> {
-    let arg =
-        Encode!(&sha256, &submitter).map_err(|e| IcpError::Decode(e.to_string()))?;
+    let arg = Encode!(&sha256).map_err(|e| IcpError::Encode(e.to_string()))?;
     let raw = agent
         .update(canister, "submit_proposal")
         .with_arg(arg)
@@ -229,23 +298,22 @@ pub async fn submit_proposal(
 }
 
 /// Casts an approve or reject vote on a governance proposal.
-/// Silently ignored by the canister if the device has already voted.
+/// The canister derives the voter identity from ic_cdk::caller().
+/// Silently ignored by the canister if the caller has already voted.
 ///
 /// Args:
-///   agent:       Configured IC agent.
+///   agent:       Configured IC agent (must use the device Ed25519 identity).
 ///   canister:    Governance canister Principal.
 ///   proposal_id: The proposal to vote on.
-///   voter:       device_id of the voting user.
 ///   approve:     true to approve, false to reject.
 pub async fn vote(
     agent: &Agent,
     canister: &Principal,
     proposal_id: u64,
-    voter: String,
     approve: bool,
 ) -> Result<(), IcpError> {
     let arg =
-        Encode!(&proposal_id, &voter, &approve).map_err(|e| IcpError::Decode(e.to_string()))?;
+        Encode!(&proposal_id, &approve).map_err(|e| IcpError::Encode(e.to_string()))?;
     agent
         .update(canister, "vote")
         .with_arg(arg)
@@ -266,38 +334,67 @@ mod tests {
     const IDENTITY_ID: &str = "u6s2n-gx777-77774-qaaba-cai";
     const GOVERNANCE_ID: &str = "uxrrr-q7777-77774-qaaaq-cai";
 
-    /// Attempts to build an agent against the local dfx replica.
+    /// Builds a test agent using a fresh in-memory identity (no file I/O).
+    async fn test_agent(url: &str) -> Option<Agent> {
+        let rng = SystemRandom::new();
+        let pkcs8 = Ed25519KeyPair::generate_pkcs8(&rng).ok()?;
+        let pem = format!(
+            "-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----\n",
+            base64::engine::general_purpose::STANDARD.encode(pkcs8.as_ref())
+        );
+        build_agent(url, pem.as_bytes()).await.ok()
+    }
+
+    /// Attempts to connect to the local dfx replica.
     /// Returns None if the replica is not reachable, allowing tests to self-skip.
     async fn try_local_agent() -> Option<Agent> {
-        build_agent(LOCAL_URL).await.ok()
+        test_agent(LOCAL_URL).await
     }
 
     // ── parse_principal ───────────────────────────────────────────────────────
 
     #[test]
     fn parse_principal_valid_returns_ok() {
-        // Verifies that a well-formed textual principal parses without error.
         assert!(parse_principal(PATTERN_ID).is_ok());
     }
 
     #[test]
     fn parse_principal_invalid_returns_err() {
-        // Verifies that a garbage string returns an Err rather than panicking.
         assert!(parse_principal("not-a-valid-principal!!").is_err());
     }
 
     #[test]
     fn parse_principal_empty_returns_err() {
-        // Verifies that an empty string returns an Err.
         assert!(parse_principal("").is_err());
+    }
+
+    // ── load_or_create_identity ───────────────────────────────────────────────
+
+    #[test]
+    fn generate_produces_valid_pem() {
+        let dir = std::env::temp_dir().join(format!("relay_test_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pem = load_or_create_identity(&dir);
+        assert!(!pem.is_empty());
+        // Must be parseable by BasicIdentity.
+        BasicIdentity::from_pem(pem.as_slice()).expect("generated PEM should be valid");
+        // File must be written.
+        assert!(dir.join("device_identity.pem").exists());
+    }
+
+    #[test]
+    fn load_returns_same_identity_on_second_call() {
+        let dir = std::env::temp_dir().join(format!("relay_test_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let first = load_or_create_identity(&dir);
+        let second = load_or_create_identity(&dir);
+        assert_eq!(first, second, "identity should be stable across calls");
     }
 
     // ── build_agent (requires local dfx) ─────────────────────────────────────
 
     #[tokio::test]
     async fn build_agent_local_fetches_root_key() {
-        // Verifies that build_agent succeeds and fetches the root key for a local replica.
-        // Skipped automatically when dfx is not running.
         let Some(_agent) = try_local_agent().await else {
             eprintln!("SKIP build_agent_local_fetches_root_key: dfx replica not reachable");
             return;
@@ -308,8 +405,6 @@ mod tests {
 
     #[tokio::test]
     async fn get_delta_since_returns_a_vec() {
-        // Verifies that get_delta_since returns Ok(Vec) without error.
-        // Does not assert empty — the local canister may already have entries from prior runs.
         let Some(agent) = try_local_agent().await else {
             eprintln!("SKIP get_delta_since: dfx replica not reachable");
             return;
@@ -324,7 +419,6 @@ mod tests {
 
     #[tokio::test]
     async fn new_device_licence_is_free() {
-        // Verifies that a freshly generated device ID returns LicenceStatus::Free.
         let Some(agent) = try_local_agent().await else {
             eprintln!("SKIP new_device_licence_is_free: dfx replica not reachable");
             return;
@@ -342,7 +436,6 @@ mod tests {
 
     #[tokio::test]
     async fn register_device_is_idempotent() {
-        // Verifies that calling register_device twice with the same device_id succeeds both times.
         let Some(agent) = try_local_agent().await else {
             eprintln!("SKIP register_device_is_idempotent: dfx replica not reachable");
             return;
@@ -361,8 +454,6 @@ mod tests {
 
     #[tokio::test]
     async fn get_proposals_returns_a_vec() {
-        // Verifies that get_proposals returns Ok(Vec) without error.
-        // Does not assert empty — other tests submit proposals to the same local canister.
         let Some(agent) = try_local_agent().await else {
             eprintln!("SKIP get_proposals: dfx replica not reachable");
             return;
@@ -375,7 +466,6 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_device_reputation_is_zero() {
-        // Verifies that get_reputation returns 0 for a device that has never interacted.
         let Some(agent) = try_local_agent().await else {
             eprintln!("SKIP unknown_device_reputation_is_zero: dfx replica not reachable");
             return;
@@ -390,17 +480,14 @@ mod tests {
 
     #[tokio::test]
     async fn submit_proposal_returns_id_and_appears_in_list() {
-        // Verifies the full proposal lifecycle: submit → appears in get_proposals.
         let Some(agent) = try_local_agent().await else {
             eprintln!("SKIP submit_proposal: dfx replica not reachable");
             return;
         };
         let canister = parse_principal(GOVERNANCE_ID).unwrap();
-        // Use a unique fake sha256 so parallel test runs don't collide.
         let sha256 = format!("{:0>64}", uuid::Uuid::new_v4().simple());
-        let submitter = uuid::Uuid::new_v4().to_string();
 
-        let proposal_id = submit_proposal(&agent, &canister, sha256.clone(), submitter)
+        let proposal_id = submit_proposal(&agent, &canister, sha256.clone())
             .await
             .expect("submit_proposal failed");
 
@@ -413,25 +500,24 @@ mod tests {
 
     #[tokio::test]
     async fn vote_approve_increments_approve_count() {
-        // Verifies that voting approve on a proposal increments its approve_votes count.
-        let Some(agent) = try_local_agent().await else {
+        let Some(submitter_agent) = try_local_agent().await else {
             eprintln!("SKIP vote_approve: dfx replica not reachable");
             return;
         };
+        // Use a separate identity for voting so submitter != voter.
+        let Some(voter_agent) = try_local_agent().await else { return };
         let canister = parse_principal(GOVERNANCE_ID).unwrap();
         let sha256 = format!("{:0>64}", uuid::Uuid::new_v4().simple());
-        let submitter = uuid::Uuid::new_v4().to_string();
-        let voter = uuid::Uuid::new_v4().to_string();
 
-        let proposal_id = submit_proposal(&agent, &canister, sha256, submitter)
+        let proposal_id = submit_proposal(&submitter_agent, &canister, sha256)
             .await
             .expect("submit_proposal failed");
 
-        vote(&agent, &canister, proposal_id, voter, true)
+        vote(&voter_agent, &canister, proposal_id, true)
             .await
             .expect("vote failed");
 
-        let proposals = get_proposals(&agent, &canister)
+        let proposals = get_proposals(&voter_agent, &canister)
             .await
             .expect("get_proposals after vote failed");
         let p = proposals

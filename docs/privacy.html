@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ReLay — Privacy Policy</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 48px auto; padding: 0 24px; color: #1a1a1a; line-height: 1.6; }
+    h1 { font-size: 1.8rem; margin-bottom: 4px; }
+    .updated { color: #666; font-size: 0.9rem; margin-bottom: 32px; }
+    h2 { font-size: 1.1rem; margin-top: 32px; }
+    ul { padding-left: 20px; }
+    a { color: #c84e2c; }
+  </style>
+</head>
+<body>
+  <h1>ReLay Privacy Policy</h1>
+  <p class="updated">Last updated: May 2025</p>
+
+  <p>ReLay is a desktop download manager. This policy explains what data is collected, what is stored locally, and what (if anything) leaves your device.</p>
+
+  <h2>What we collect</h2>
+  <p><strong>Nothing by default.</strong> ReLay has no built-in telemetry, crash reporting, or analytics. We do not collect usage data, download history, or any personal information.</p>
+
+  <h2>What is stored locally on your device</h2>
+  <ul>
+    <li><strong>SQLite database</strong> — stored in your OS app data directory. Contains download history, settings, and Shield scan results. Never transmitted anywhere.</li>
+    <li><strong>device_identity.pem</strong> — a cryptographic Ed25519 keypair generated on first launch. Stored in your app data directory. Used to identify your device pseudonymously when interacting with the ICP governance canister (voting on threat proposals). The key never leaves your device in plaintext.</li>
+    <li><strong>config.toml</strong> — canister IDs and worker URL. No credentials or personal data.</li>
+    <li><strong>relay_errors.log</strong> — local error log written only when you trigger an action that fails. Never transmitted.</li>
+  </ul>
+
+  <h2>Optional VirusTotal integration</h2>
+  <p>If you choose to enter a VirusTotal API key in Settings, ReLay will send the <strong>SHA-256 hash</strong> (not the file itself) of downloaded files to the VirusTotal API for reputation checking. This is opt-in and can be disabled at any time. VirusTotal is a Google service — their privacy policy applies to any hashes submitted.</p>
+
+  <h2>ICP canister interaction</h2>
+  <p>ReLay periodically syncs threat signature data from the ICP Pattern Canister. This sync sends no personal data — it is a read-only query. If you submit a zero-day threat report or vote on a governance proposal, the action is attributed to your device's cryptographic principal (derived from device_identity.pem), not your name or email address.</p>
+
+  <h2>Payment (Pro subscription)</h2>
+  <p>Payments are processed by Paystack. When you subscribe, your email address and a pseudonymous device ID are sent to Paystack and our Cloudflare Worker to provision your licence. We do not store credit card details — Paystack handles all payment processing. Paystack's privacy policy applies to payment transactions.</p>
+
+  <h2>Browser extension</h2>
+  <p>The ReLay browser extension intercepts download links and forwards them to the desktop app via native messaging. It does not transmit URLs or download metadata to any server. All communication is local between the extension and the desktop app.</p>
+
+  <h2>Contact</h2>
+  <p>Questions about this policy: <a href="mailto:justpanagos@gmail.com">justpanagos@gmail.com</a></p>
+</body>
+</html>

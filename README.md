@@ -1,6 +1,17 @@
 # ReLay
 
-> Downloads, redefined.
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)"  srcset="src/assets/relay-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="src/assets/relay-light.svg">
+    <img src="src/assets/relay-dark.svg" alt="ReLay — Secure Download Mesh" width="200">
+  </picture>
+</p>
+
+[![GitHub Release](https://img.shields.io/github/v/release/Justin-Panangos/ReLay)](https://github.com/Justin-Panangos/ReLay/releases/latest)
+[![Privacy Policy](https://img.shields.io/badge/privacy-policy-blue)](https://justin-panangos.github.io/ReLay/privacy)
+
+**[Download for macOS](https://github.com/Justin-Panangos/ReLay/releases/latest)** · **[Download for Windows](https://github.com/Justin-Panangos/ReLay/releases/latest)** · **[Download for Linux](https://github.com/Justin-Panangos/ReLay/releases/latest)**
 
 A cross-platform desktop download manager built with Rust and Tauri. ReLay combines fast parallel chunked downloads, full torrent support, smart queue management, and a 7-layer virus scanner (ReLay Shield) backed by a decentralised threat intelligence network on the Internet Computer Protocol (ICP).
 
@@ -9,7 +20,7 @@ A cross-platform desktop download manager built with Rust and Tauri. ReLay combi
 ## Features
 
 ### Core Downloads
-- HTTP/HTTPS downloads with parallel chunking (4 chunks free / 16 Pro)
+- HTTP/HTTPS downloads with parallel chunking (16 chunks free / 32 Pro)
 - HTTP/2 multiplexing via reqwest
 - Pause, resume, and cancel at any point
 - Per-download bandwidth cap — Pro users can set a live kbps limit per download
@@ -34,7 +45,7 @@ A cross-platform desktop download manager built with Rust and Tauri. ReLay combi
 
 ### Decentralised Threat Network (ICP)
 - Signature database synced every 12 hours from ICP Pattern Canister
-- Anonymous zero-day submission — help protect other ReLay users
+- Pseudonymous zero-day submission — attributed to your device's cryptographic principal
 - DAO voting for community threat review (Pro, opt-in)
 - Public Threat Intelligence API for developers and researchers
 
@@ -46,14 +57,12 @@ A cross-platform desktop download manager built with Rust and Tauri. ReLay combi
 
 ### Pro Tier ($5/month)
 - Unlimited simultaneous HTTP downloads
-- 16 parallel chunks per download
+- 32 parallel chunks per download
 - Per-download bandwidth limit (live, adjustable mid-download)
 - Drag-and-drop queue reorder
 - Time-window download scheduling
 - Sandbox scanning (Layer 7)
-- Browser extension
-- Download history: 100 entries (vs 3 free)
-- 200 torrent peers
+- Download history: 50 entries
 - ICP Shield DAO voting rights
 
 ---
@@ -117,9 +126,9 @@ Outputs to `src-tauri/target/release/bundle/`.
 
 ---
 
-## Acquisition Due Diligence — Running the Code
+## Getting Started — Full Stack Verification
 
-This section is written for prospective buyers who want to run, explore, and verify the full stack before any acquisition discussion.
+This section walks through running and verifying the complete stack end to end.
 
 ### Step 1 — Prerequisites
 
@@ -167,7 +176,7 @@ These features work immediately with no API keys or accounts:
 | Chunked parallel download | Watch the download card — speed should exceed a single-connection browser download |
 | Pause / resume / cancel | Use the controls on any active download card |
 | Torrent (magnet link) | Paste any public-domain magnet link (e.g. Debian ISO) |
-| Queue management | Start multiple downloads, drag to reorder |
+| Queue management | Start multiple downloads — they chain automatically |
 | Shield layers 2–4 | Download any file — YARA, entropy, and file-type checks run automatically, no key needed |
 | EICAR virus test | Download `https://www.eicar.org/download/eicar.com` — Shield should quarantine it |
 | Quarantine tab | Quarantined files appear here with restore/delete options |

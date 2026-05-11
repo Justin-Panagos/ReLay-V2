@@ -1,5 +1,6 @@
 use crate::db::{self, DbState};
 use crate::download::{self, lifecycle};
+use crate::pro::{self, LicenceCacheState};
 use std::sync::atomic::Ordering;
 use tauri::{Manager, State};
 
@@ -248,19 +249,22 @@ pub async fn resume_download(
 
 /// Reorders the pending download queue to match the given ordered list of IDs.
 /// Only IDs currently in the queue are affected; unknown IDs are silently ignored.
-/// Pro-only: the frontend enforces this — the backend applies the reorder unconditionally.
+/// Pro-only: requires an active Pro licence; returns Err if the licence check fails.
 ///
 /// Args:
 ///   ordered_ids: Download IDs in the desired queue order (front = next to start).
 ///   queue:       Tauri-managed queue state.
+///   cache:       Tauri-managed in-memory licence cache.
 ///
 /// Returns:
-///   Ok(()) always.
+///   Ok(()) on success, Err("Pro subscription required") if not Pro.
 #[tauri::command]
 pub fn reorder_queue(
     ordered_ids: Vec<i64>,
     queue: State<'_, lifecycle::QueueState>,
+    cache: State<'_, LicenceCacheState>,
 ) -> Result<(), String> {
+    pro::require_pro(&cache)?;
     let mut q = queue.0.lock().unwrap_or_else(|p| p.into_inner());
     let current: std::collections::HashSet<i64> = q.iter().copied().collect();
     *q = ordered_ids
@@ -273,22 +277,26 @@ pub fn reorder_queue(
 /// Stores an optional time-window schedule for a download.
 /// When set, the schedule watchdog will auto-pause/resume the download based on local time.
 /// Start and end are "HH:MM" strings in 24-hour format; pass null to clear the schedule.
+/// Pro-only: requires an active Pro licence; returns Err if the licence check fails.
 ///
 /// Args:
 ///   id:    The download row id.
 ///   start: Schedule window start as "HH:MM", or None to clear.
 ///   end:   Schedule window end as "HH:MM", or None to clear.
 ///   db:    Tauri-managed database state.
+///   cache: Tauri-managed in-memory licence cache.
 ///
 /// Returns:
-///   Ok(()) on success, Err on DB write failure.
+///   Ok(()) on success, Err("Pro subscription required") if not Pro, Err on DB write failure.
 #[tauri::command]
 pub fn set_download_schedule(
     id: i64,
     start: Option<String>,
     end: Option<String>,
     db: State<'_, DbState>,
+    cache: State<'_, LicenceCacheState>,
 ) -> Result<(), String> {
+    pro::require_pro(&cache)?;
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     db::set_download_schedule(&conn, id, start.as_deref(), end.as_deref())
         .map_err(|e| e.to_string())
@@ -298,22 +306,26 @@ pub fn set_download_schedule(
 /// If the download is currently active, updates the in-flight `AtomicU32` so the
 /// throttle takes effect on the next written chunk without interrupting the download.
 /// Also persists the new limit to the database so it survives a pause/resume cycle.
+/// Pro-only: requires an active Pro licence; returns Err if the licence check fails.
 ///
 /// Args:
 ///   id:        The download row id.
 ///   kbps:      Bandwidth limit in kilobits per second (0 = unlimited).
 ///   db:        Tauri-managed database state.
 ///   lifecycle: Tauri-managed lifecycle state.
+///   cache:     Tauri-managed in-memory licence cache.
 ///
 /// Returns:
-///   Ok(()) on success. Err on DB write failure.
+///   Ok(()) on success, Err("Pro subscription required") if not Pro, Err on DB write failure.
 #[tauri::command]
 pub fn set_download_bandwidth(
     id: i64,
     kbps: u32,
     db: State<'_, DbState>,
     lifecycle: State<'_, lifecycle::LifecycleState>,
+    cache: State<'_, LicenceCacheState>,
 ) -> Result<(), String> {
+    pro::require_pro(&cache)?;
     // Update persisted limit so resume picks it up.
     {
         let conn = db.0.lock().map_err(|e| e.to_string())?;
@@ -323,6 +335,7 @@ pub fn set_download_bandwidth(
     {
         let guard = lifecycle.0.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(handle) = guard.get(&id) {
+            // Relaxed: a single stale chunk at throttle change is acceptable.
             handle.bandwidth.store(kbps, std::sync::atomic::Ordering::Relaxed);
         }
     }

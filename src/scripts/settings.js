@@ -5,6 +5,7 @@
 import { invoke } from '@tauri-apps/api/tauri'
 import { showErrorToast } from './toast.js'
 import { t, loadLocale, getLang } from './i18n.js'
+import { applyTheme } from './theme.js'
 
 /**
  * Initialises the Settings tab.
@@ -20,11 +21,7 @@ export async function initSettings() {
     themeEl.addEventListener('change', async () => {
       const theme = themeEl.value
       await invoke('set_setting', { key: 'theme', value: theme }).catch(() => {})
-      if (theme === 'auto') {
-        document.documentElement.removeAttribute('data-theme')
-      } else {
-        document.documentElement.setAttribute('data-theme', theme)
-      }
+      applyTheme(theme)
     })
   }
 

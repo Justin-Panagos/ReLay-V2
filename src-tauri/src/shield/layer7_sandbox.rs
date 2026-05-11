@@ -408,13 +408,32 @@ pub async fn scan(ctx: &ScanContext) -> (LayerResult, Option<SandboxReport>) {
                     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
                     | JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION;
 
-                SetInformationJobObject(
+                // Both Win32 calls return BOOL (0 = failure). Check both — if either fails
+                // the process is not contained, so we must not report Clean.
+                let setup_ok = SetInformationJobObject(
                     job,
                     JobObjectExtendedLimitInformation,
                     &limits as *const _ as *const _,
                     std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-                );
-                AssignProcessToJobObject(job, proc);
+                ) != 0 && AssignProcessToJobObject(job, proc) != 0;
+
+                if !setup_ok {
+                    CloseHandle(job);
+                    CloseHandle(proc);
+                    child.kill().await.ok();
+                    child.wait().await.ok();
+                    return (
+                        LayerResult {
+                            layer: 7,
+                            name: "Sandbox",
+                            verdict: LayerVerdict::Suspicious {
+                                reason: "Job Object sandbox setup failed — process not contained"
+                                    .to_string(),
+                            },
+                        },
+                        None,
+                    );
+                }
             }
 
             // Wait up to 45 s.
