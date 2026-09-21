@@ -105,6 +105,31 @@ fn check_blocklist(url: &str) -> Option<String> {
     None
 }
 
+#[cfg(test)]
+mod tests {
+    use super::check_blocklist;
+
+    #[test]
+    fn suspicious_tld_flagged() {
+        assert!(check_blocklist("https://evil.tk/file.exe").is_some());
+    }
+
+    #[test]
+    fn suspicious_path_flagged() {
+        assert!(check_blocklist("https://example.com/exploit/payload.bin").is_some());
+    }
+
+    #[test]
+    fn clean_url_passes() {
+        assert!(check_blocklist("https://example.com/files/report.pdf").is_none());
+    }
+
+    #[test]
+    fn suspicious_tld_with_port_flagged() {
+        assert!(check_blocklist("https://host.xyz:8443/file.zip").is_some());
+    }
+}
+
 /// Queries the VirusTotal v3 API for a URL analysis report.
 /// Uses base64url encoding of the URL as required by the VT API.
 ///

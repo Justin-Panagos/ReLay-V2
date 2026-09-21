@@ -67,6 +67,21 @@ A cross-platform desktop download manager built with Rust and Tauri. ReLay combi
 
 ---
 
+## Status & Contributing
+
+ReLay is actively developed and not yet production-ready. Core download, torrent, and Shield scanning are functional, but the project is still maturing — there are rough edges and limited test coverage.
+
+**Contributors are welcome.** If you're interested in helping, good places to start:
+
+- **Tests** — unit and integration coverage for chunked downloads, Shield layers, and the Cloudflare Worker
+- **Windows / Linux testing** — most development has been on macOS; bug reports and fixes on other platforms are very valuable
+- **UI polish** — the interface is functional but unrefined; accessibility improvements and UX tweaks are appreciated
+- **Documentation** — inline code comments, architecture write-ups, and contributor guides
+
+To get started, see [Building From Source](#building-from-source) below. Open issues are tracked on GitHub at [Justin-Panangos/ReLay/issues](https://github.com/Justin-Panangos/ReLay/issues).
+
+---
+
 ## Tech Stack
 
 | Layer | Technology |

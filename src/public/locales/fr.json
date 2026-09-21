@@ -110,7 +110,7 @@
     "theme_dark": "Sombre",
     "sandbox_label": "Analyse Sandbox",
     "vt_key_label": "Clé API VirusTotal",
-    "vt_key_placeholder": "Coller la clé API…",
+    "vt_key_placeholder": "Optionnel — uniquement pour les exécutables",
     "language": "Langue"
   },
   "detail": {

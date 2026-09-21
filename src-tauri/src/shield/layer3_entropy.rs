@@ -131,3 +131,34 @@ fn shannon_entropy(data: &[u8]) -> f64 {
         })
         .sum()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zero_bytes_have_zero_entropy() {
+        let data = vec![0u8; 4096];
+        assert_eq!(shannon_entropy(&data), 0.0);
+    }
+
+    #[test]
+    fn uniform_distribution_has_max_entropy() {
+        // 0..=255 repeated — each byte appears equally often → entropy ≈ 8.0 bits.
+        let data: Vec<u8> = (0u8..=255).cycle().take(4096).collect();
+        let h = shannon_entropy(&data);
+        assert!(h > 7.9, "uniform distribution entropy should be near 8.0, got {h}");
+    }
+
+    #[test]
+    fn zero_entropy_is_below_threshold() {
+        let h = shannon_entropy(&vec![0u8; 4096]);
+        assert!(h < ENTROPY_THRESHOLD);
+    }
+
+    #[test]
+    fn high_entropy_exceeds_threshold() {
+        let data: Vec<u8> = (0u8..=255).cycle().take(4096).collect();
+        assert!(shannon_entropy(&data) > ENTROPY_THRESHOLD);
+    }
+}

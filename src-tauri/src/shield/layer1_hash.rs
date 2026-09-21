@@ -8,12 +8,13 @@ use crate::db::{self, DbState};
 
 /// Layer 1: SHA-256 hash check.
 /// Computes the file's SHA-256 digest and stores it in `ctx.sha256`.
-/// Checks the local ICP pattern cache first, then the VirusTotal API (if configured).
+/// Checks the local ICP pattern cache first, then the VirusTotal API (if a key is configured
+/// AND the file is a recognised executable type — PE, ELF, Mach-O, or shared library).
 /// Returns Threat immediately if a match is found in either source; Clean otherwise.
 ///
 /// Args:
 ///   ctx:    Mutable scan context — `sha256` field is populated by this layer.
-///   vt_key: Optional VirusTotal API key from settings.
+///   vt_key: Optional VirusTotal API key from settings. VT is skipped when None or file is not executable.
 ///   app:    Tauri app handle used to access the shared DbState for ICP cache lookup.
 ///
 /// Returns:
@@ -55,32 +56,34 @@ pub async fn scan(
         }
     }
 
-    // ── Step 3: optional VirusTotal lookup ────────────────────────────────────
+    // ── Step 3: optional VirusTotal lookup (executables only) ────────────────
     if let Some(key) = vt_key {
-        let client = app
-            .try_state::<reqwest::Client>()
-            .map(|s| s.inner().clone())
-            .unwrap_or_else(reqwest::Client::new);
-        match check_virustotal(&sha256, key, &client).await {
-            Ok(Some(reason)) => {
-                return LayerResult {
-                    layer: 1,
-                    name: "Hash",
-                    verdict: LayerVerdict::Threat { reason },
-                };
-            }
-            Ok(None) => {}
-            Err(e) => {
-                eprintln!("[shield] VirusTotal lookup failed: {e}");
-                // VT error (rate-limit, bad key, network) — do not treat as Clean silently.
-                // Return Suspicious so the scan log shows the failure.
-                return LayerResult {
-                    layer: 1,
-                    name: "Hash",
-                    verdict: LayerVerdict::Suspicious {
-                        reason: format!("VirusTotal check failed: {e}"),
-                    },
-                };
+        if is_executable_path(&ctx.path) {
+            let client = app
+                .try_state::<reqwest::Client>()
+                .map(|s| s.inner().clone())
+                .unwrap_or_else(reqwest::Client::new);
+            match check_virustotal(&sha256, key, &client).await {
+                Ok(Some(reason)) => {
+                    return LayerResult {
+                        layer: 1,
+                        name: "Hash",
+                        verdict: LayerVerdict::Threat { reason },
+                    };
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    eprintln!("[shield] VirusTotal lookup failed: {e}");
+                    // VT error (rate-limit, bad key, network) — do not treat as Clean silently.
+                    // Return Suspicious so the scan log shows the failure.
+                    return LayerResult {
+                        layer: 1,
+                        name: "Hash",
+                        verdict: LayerVerdict::Suspicious {
+                            reason: format!("VirusTotal check failed: {e}"),
+                        },
+                    };
+                }
             }
         }
     }
@@ -90,6 +93,32 @@ pub async fn scan(
         name: "Hash",
         verdict: LayerVerdict::Clean,
     }
+}
+
+/// Executable MIME types detected from magic bytes — mirrors the list in `layer4_filetype`.
+const EXEC_MIMES: &[&str] = &[
+    "application/x-dosexec",   // PE / Windows EXE/DLL
+    "application/x-executable", // ELF
+    "application/x-sharedlib", // shared library
+    "application/x-mach-binary", // Mach-O
+    "application/x-msdownload", // Windows installer / DLL
+];
+
+/// Returns true if the file at `path` is a recognised executable binary (PE, ELF, Mach-O,
+/// or shared library) as determined from magic bytes via the `infer` crate.
+/// Files that cannot be read or have an unknown type return false.
+///
+/// Args:
+///   path: Path to the file to inspect.
+///
+/// Returns:
+///   true if the file is an executable binary type; false otherwise.
+fn is_executable_path(path: &std::path::Path) -> bool {
+    infer::get_from_path(path)
+        .ok()
+        .flatten()
+        .map(|kind| EXEC_MIMES.contains(&kind.mime_type()))
+        .unwrap_or(false)
 }
 
 /// Computes the SHA-256 digest of a file and returns it as a lowercase hex string.

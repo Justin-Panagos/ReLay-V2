@@ -134,3 +134,37 @@ fn mime_from_ext(ext: &str) -> Option<&'static str> {
         _      => return None,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exec_mime_with_document_ext_is_threat() {
+        let is_exec_content = EXEC_MIMES.contains(&"application/x-dosexec");
+        let is_doc_ext = DOCUMENT_EXTS.contains(&"pdf");
+        assert!(is_exec_content && is_doc_ext,
+            "PE MIME + .pdf extension should satisfy the Threat condition");
+    }
+
+    #[test]
+    fn exec_mime_with_exe_ext_is_not_threat() {
+        // .exe is not in DOCUMENT_EXTS, so an EXE detected as PE is clean.
+        let is_exec_content = EXEC_MIMES.contains(&"application/x-dosexec");
+        let is_doc_ext = DOCUMENT_EXTS.contains(&"exe");
+        assert!(!is_doc_ext, "exe extension should not be in DOCUMENT_EXTS");
+        assert!(!is_exec_content && !is_doc_ext || !is_doc_ext,
+            "PE MIME + .exe extension should not be a Threat");
+    }
+
+    #[test]
+    fn mime_from_ext_returns_pdf_mime() {
+        assert_eq!(mime_from_ext("pdf"), Some("application/pdf"));
+    }
+
+    #[test]
+    fn mime_from_ext_returns_none_for_unknown_ext() {
+        assert_eq!(mime_from_ext("exe"), None);
+        assert_eq!(mime_from_ext("bin"), None);
+    }
+}

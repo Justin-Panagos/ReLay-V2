@@ -18,6 +18,7 @@ let countdownTimer = null
 
 let pendingEmail = ''
 let pendingPlan  = ''
+let pendingRef   = ''
 let storedKey    = ''
 
 // ── Initialisation ────────────────────────────────────────────────────────────
@@ -201,14 +202,16 @@ function wireNoKeyButtons() {
       const email = emailEl?.value.trim() ?? ''
       if (!isValidEmail(email)) { emailEl?.focus(); return }
       const plan = btn.dataset.plan
+      let ref
       try {
-        await invoke('api_key_checkout', { plan, email })
+        ref = await invoke('api_key_checkout', { plan, email })
       } catch (err) {
         showErrorToast(`Could not start checkout: ${err}`)
         return
       }
       pendingEmail = email
       pendingPlan  = plan
+      pendingRef   = ref ?? ''
       startPolling(planLabel(plan))
     })
   })
@@ -252,7 +255,10 @@ async function doPoll() {
 
   let status
   try {
-    status = await invoke('poll_developer_status', { email: pendingEmail })
+    status = await invoke('poll_developer_status', {
+      email: pendingEmail,
+      refStr: pendingRef || null,
+    })
   } catch {
     return
   }

@@ -374,7 +374,7 @@ mod tests {
     fn generate_produces_valid_pem() {
         let dir = std::env::temp_dir().join(format!("relay_test_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
-        let pem = load_or_create_identity(&dir);
+        let pem = load_or_create_identity(&dir).expect("should generate identity");
         assert!(!pem.is_empty());
         // Must be parseable by BasicIdentity.
         BasicIdentity::from_pem(pem.as_slice()).expect("generated PEM should be valid");
@@ -386,8 +386,8 @@ mod tests {
     fn load_returns_same_identity_on_second_call() {
         let dir = std::env::temp_dir().join(format!("relay_test_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
-        let first = load_or_create_identity(&dir);
-        let second = load_or_create_identity(&dir);
+        let first = load_or_create_identity(&dir).expect("should generate identity");
+        let second = load_or_create_identity(&dir).expect("should load identity");
         assert_eq!(first, second, "identity should be stable across calls");
     }
 

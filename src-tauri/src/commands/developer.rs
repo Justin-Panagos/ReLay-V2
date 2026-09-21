@@ -121,7 +121,7 @@ pub async fn api_key_checkout(
     config: State<'_, ConfigState>,
     client: State<'_, reqwest::Client>,
     app: tauri::AppHandle,
-) -> Result<(), String> {
+) -> Result<String, String> {
     if email.is_empty() {
         return Err("email is required".to_string());
     }
@@ -141,27 +141,36 @@ pub async fn api_key_checkout(
         .as_str()
         .ok_or_else(|| "no authorization_url in response".to_string())?
         .to_string();
-    tauri::api::shell::open(&app.shell_scope(), url, None).map_err(|e| e.to_string())
+    let reference = json["reference"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+    tauri::api::shell::open(&app.shell_scope(), url, None).map_err(|e| e.to_string())?;
+    Ok(reference)
 }
 
-/// Polls the Cloudflare Worker to check whether a payment has completed for the
-/// given email. Checks /api/key-status then /api/snap-status. Saves credentials
-/// to SQLite when found.
+/// Polls the Cloudflare Worker to check whether a payment has completed.
+/// Checks /api/key-status (using the checkout reference when available, otherwise
+/// email) then /api/snap-status. Saves credentials to SQLite when found.
 ///
 /// Returns DevStatus { found: false, ... } when payment is still pending — this
 /// is not an error, the caller should retry.
 ///
 /// Args:
-///   email:  Email address used at checkout.
-///   config: Tauri-managed ICP config state (reads worker_url).
-///   client: Shared reqwest HTTP client.
-///   db:     Tauri-managed database state (persists credentials on success).
+///   email:   Email address used at checkout.
+///   ref_str: Paystack checkout reference returned by api_key_checkout. When
+///            provided, key-status is looked up by reference rather than email,
+///            making it impossible for a third party to race the real buyer.
+///   config:  Tauri-managed ICP config state (reads worker_url).
+///   client:  Shared reqwest HTTP client.
+///   db:      Tauri-managed database state (persists credentials on success).
 ///
 /// Returns:
 ///   DevStatus with found=true when payment is confirmed, found=false when still waiting.
 #[tauri::command]
 pub async fn poll_developer_status(
     email: String,
+    ref_str: Option<String>,
     config: State<'_, ConfigState>,
     client: State<'_, reqwest::Client>,
     db: State<'_, DbState>,
@@ -171,10 +180,17 @@ pub async fn poll_developer_status(
     }
     let worker_url = get_worker_url(&config)?;
 
-    // Try API key subscription first.
+    // Try API key subscription first, preferring the checkout reference so that
+    // only the buyer (who received the reference from api_key_checkout) can claim
+    // the key — anyone knowing the email alone cannot race them.
+    let key_query: Vec<(&str, &str)> = if let Some(ref r) = ref_str {
+        vec![("ref", r.as_str())]
+    } else {
+        vec![("email", email.as_str())]
+    };
     let key_resp = client
         .get(format!("{worker_url}/api/key-status"))
-        .query(&[("email", &email)])
+        .query(&key_query)
         .send()
         .await
         .map_err(|e| format!("network error: {e}"))?;

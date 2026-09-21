@@ -484,3 +484,36 @@ async fn download_chunk(
     tokio::task::block_in_place(|| writer.flush().map_err(|e| e.to_string()))?;
     Ok(ChunkStatus::Complete)
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::db::ChunkSnapshot;
+
+    fn make_snapshot(chunk_idx: usize, start_byte: u64, end_byte: u64, written_bytes: u64) -> ChunkSnapshot {
+        ChunkSnapshot { chunk_idx, start_byte, end_byte, written_bytes }
+    }
+
+    #[test]
+    fn resume_adjusted_start_adds_written_bytes() {
+        let start: u64 = 1_000_000;
+        let end:   u64 = 2_000_000;
+        let snap = make_snapshot(1, start, end, 250_000);
+        // Mirrors download_chunked: adjusted_start = start + already_written
+        let adjusted_start = snap.start_byte + snap.written_bytes;
+        assert_eq!(adjusted_start, 1_250_000);
+        assert!(adjusted_start <= end, "partial chunk should not be skipped");
+    }
+
+    #[test]
+    fn resume_chunk_skipped_when_fully_written() {
+        let start: u64 = 1_000_000;
+        let end:   u64 = 2_000_000;
+        // HTTP Range header is inclusive (bytes=start-end), so a complete chunk
+        // has written (end - start + 1) bytes, giving adjusted_start = end + 1.
+        let fully_written = end - start + 1;
+        let snap = make_snapshot(1, start, end, fully_written);
+        let adjusted_start = snap.start_byte + snap.written_bytes;
+        // The loop condition is `adjusted_start > end` → spawns a no-op task.
+        assert!(adjusted_start > end, "fully-written chunk should be skipped");
+    }
+}

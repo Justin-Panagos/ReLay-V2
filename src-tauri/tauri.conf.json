@@ -19,8 +19,7 @@
         "message": true
       },
       "window": {
-        "setSize": true,
-        "all": true
+        "setSize": true
       }
     },
     "bundle": {
@@ -54,7 +53,7 @@
       }
     },
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src ipc: https://ipc.localhost"
     },
     "updater": {
       "active": true,

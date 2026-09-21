@@ -10,6 +10,11 @@ use std::sync::Arc;
 use tauri::Manager;
 use tokio_util::sync::CancellationToken;
 
+/// Maximum number of automatic retry attempts before a download is marked failed.
+const MAX_RETRY_ATTEMPTS: u32 = 4;
+/// Exponential-ish back-off delays in seconds, one entry per attempt.
+const RETRY_BACKOFF_SECS: &[u64] = &[5, 10, 20, 40];
+
 /// Progress payload emitted to the frontend on each reporter tick.
 #[derive(Clone, serde::Serialize)]
 pub struct ProgressPayload {
@@ -72,8 +77,8 @@ pub async fn download_file(
     intent: Arc<AtomicU8>,
     bandwidth: Arc<AtomicU32>,
 ) {
-    const MAX_RETRIES: u32 = 4;
-    const BACKOFF_SECS: [u64; 4] = [5, 10, 20, 40];
+    const MAX_RETRIES: u32 = MAX_RETRY_ATTEMPTS;
+    const BACKOFF_SECS: &[u64] = RETRY_BACKOFF_SECS;
 
     let dest_path = PathBuf::from(&destination);
     let file_path = dest_path.join(&filename);
@@ -682,4 +687,27 @@ pub fn extract_filename(url: &str) -> String {
         .filter(|s| !s.is_empty())
         .unwrap_or("download")
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backoff_table_length_matches_max_retries() {
+        // The retry loop indexes RETRY_BACKOFF_SECS by attempt count, so the
+        // slice must be exactly MAX_RETRY_ATTEMPTS entries long.
+        assert_eq!(
+            RETRY_BACKOFF_SECS.len(),
+            MAX_RETRY_ATTEMPTS as usize,
+            "RETRY_BACKOFF_SECS length must equal MAX_RETRY_ATTEMPTS"
+        );
+    }
+
+    #[test]
+    fn extract_filename_strips_path_and_query() {
+        assert_eq!(extract_filename("https://example.com/files/foo.zip?v=1"), "foo.zip");
+        assert_eq!(extract_filename("https://example.com/"), "download");
+        assert_eq!(extract_filename("https://example.com/bar.tar.gz"), "bar.tar.gz");
+    }
 }

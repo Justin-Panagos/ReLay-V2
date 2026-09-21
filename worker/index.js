@@ -464,7 +464,10 @@ async function handleApiCheckout(request, env) {
   })
   const json = await resp.json()
   if (!json.status) return new Response('Paystack init failed', { status: 502 })
-  return new Response(JSON.stringify({ authorization_url: json.data.authorization_url }), {
+  return new Response(JSON.stringify({
+    authorization_url: json.data.authorization_url,
+    reference: json.data.reference,
+  }), {
     headers: { 'Content-Type': 'application/json' },
   })
 }
@@ -608,6 +611,9 @@ async function handleWebhook(request, env) {
         await env.RELAY_LICENCES.put(`api:${apiKey}`, 'active', { expirationTtl: 32 * 24 * 60 * 60 })
         // Map reference → key so /api/callback can display it.
         await env.RELAY_LICENCES.put(`ref:${ref}`, JSON.stringify({ type: 'api_key', apiKey }), { expirationTtl: 25 * 60 * 60 })
+        // Map reference → full credentials so the desktop app can claim using the checkout ref.
+        // Single-use: deleted on first read so the key cannot be harvested by a second caller.
+        await env.RELAY_LICENCES.put(`ref_key:${ref}`, JSON.stringify({ apiKey, plan, expiry }), { expirationTtl: 24 * 60 * 60 })
         await callGrantApiKey(agent, identityId, apiKey, expiry)
         // Map email → key so the desktop app can poll for it.
         const keyEmail = event.data.customer?.email ?? ''
@@ -953,15 +959,26 @@ async function handleCancelSubscription(request, env) {
  *   JSON { type, apiKey, plan, expiry } on success, 404 if not found.
  */
 async function handleApiKeyStatus(request, env) {
-  const email = new URL(request.url).searchParams.get('email')
-  if (!email) return new Response('missing email', { status: 400 })
+  const params = new URL(request.url).searchParams
+  const ref    = params.get('ref')
+  const email  = params.get('email')
+  if (!ref && !email) return new Response('missing ref or email', { status: 400 })
   const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown'
   if (!await checkRateLimit(env, ip, 'key-status', 10)) {
     return new Response('too many requests', { status: 429 })
   }
+  // Prefer ref-based lookup — tied to the checkout session the buyer controls.
+  if (ref) {
+    const raw = await env.RELAY_LICENCES.get(`ref_key:${ref}`)
+    if (!raw) return new Response('not found', { status: 404 })
+    await env.RELAY_LICENCES.delete(`ref_key:${ref}`)
+    return new Response(JSON.stringify({ type: 'api_key', ...JSON.parse(raw) }), {
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+  // Fallback: email-based lookup for clients that pre-date ref support.
   const raw = await env.RELAY_LICENCES.get(`email_key:${email}`)
   if (!raw) return new Response('not found', { status: 404 })
-  // Delete after retrieval — single-use to prevent credential harvesting by email alone.
   await env.RELAY_LICENCES.delete(`email_key:${email}`)
   return new Response(JSON.stringify({ type: 'api_key', ...JSON.parse(raw) }), {
     headers: { 'Content-Type': 'application/json' },

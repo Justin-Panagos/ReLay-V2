@@ -12,7 +12,7 @@
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use std::io::{self, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // ── Wire format ───────────────────────────────────────────────────────────────
 
@@ -132,6 +132,11 @@ pub fn install_host_manifest() -> Result<(), String> {
 /// Returns:
 ///   `Ack { id }` on success, `Error { message }` on failure.
 fn handle_start_download(conn: &Connection, url: String, filename: String) -> OutboundMessage {
+    let filename = match sanitize_filename(&filename) {
+        Some(f) => f,
+        None => return OutboundMessage::Error { message: "invalid filename".into() },
+    };
+
     let destination = conn
         .query_row(
             "SELECT value FROM settings WHERE key = 'default_folder'",
@@ -428,6 +433,23 @@ fn write_manifest_windows(manifest: &str) -> Result<(), String> {
 }
 
 // ── Misc utilities ────────────────────────────────────────────────────────────
+
+/// Strips any directory components from `raw` and rejects names that contain
+/// path separators or consist solely of `..`.
+///
+/// Args:
+///   raw: The filename string received from the extension, potentially an
+///        absolute path.
+///
+/// Returns:
+///   The bare filename as `Some(String)`, or `None` if the input is invalid.
+fn sanitize_filename(raw: &str) -> Option<String> {
+    let name = Path::new(raw).file_name()?.to_str()?;
+    if name.contains('/') || name.contains('\\') || name == ".." {
+        return None;
+    }
+    Some(name.to_string())
+}
 
 /// Returns the current UTC datetime as an ISO-8601 string.
 ///
