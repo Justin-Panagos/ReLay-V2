@@ -4,7 +4,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)"  srcset="src/assets/relay-dark.svg">
     <source media="(prefers-color-scheme: light)" srcset="src/assets/relay-light.svg">
-    <img src="src/assets/relay-dark.svg" alt="ReLay — Secure Download Mesh" width="200">
+    <img src="src/assets/relay-dark.svg" alt="ReLay: Secure Download Mesh" width="200">
   </picture>
 </p>
 
@@ -23,36 +23,36 @@ A cross-platform desktop download manager built with Rust and Tauri. ReLay combi
 - HTTP/HTTPS downloads with parallel chunking (16 chunks free / 32 Pro)
 - HTTP/2 multiplexing via reqwest
 - Pause, resume, and cancel at any point
-- Per-download bandwidth cap — Pro users can set a live kbps limit per download
-- Auto-retry on network failure — up to 4 attempts with exponential backoff (5s → 10s → 20s → 40s)
+- Per-download bandwidth cap (Pro: set a live kbps limit per download)
+- Auto-retry on network failure, up to 4 attempts with exponential backoff (5s → 10s → 20s → 40s)
 - Magnet link and .torrent file support (DHT + PEX peer discovery)
 - UPnP port forwarding for inbound peer connections (port 6881)
 - Drag-and-drop URLs and .torrent files
 
 ### Queue Management
-- Sequential chaining — queued downloads start automatically when a slot opens
+- Sequential chaining: queued downloads start automatically when a slot opens
 - Drag-and-drop queue reorder (Pro)
-- Time-window scheduling — set a start/end time and downloads pause/resume automatically (Pro)
+- Time-window scheduling: set a start/end time and downloads pause/resume automatically (Pro)
 
 ### ReLay Shield
-- Layer 1 — Hash reputation (VirusTotal)
-- Layer 2 — YARA rules scan
-- Layer 3 — Entropy analysis (detects packed/encrypted payloads)
-- Layer 4 — File type mismatch detection
-- Layer 5 — URL/IP reputation
-- Layer 6 — Static binary heuristics
-- Layer 7 — Sandbox behavioural analysis — macOS (`sandbox-exec`), Linux (network namespace), Windows (Job Objects) — Pro, opt-in
+- Layer 1: Hash reputation (VirusTotal)
+- Layer 2: YARA rules scan
+- Layer 3: Entropy analysis (detects packed/encrypted payloads)
+- Layer 4: File type mismatch detection
+- Layer 5: URL/IP reputation
+- Layer 6: Static binary heuristics
+- Layer 7: Sandbox behavioural analysis - macOS (`sandbox-exec`), Linux (network namespace), Windows (Job Objects) - Pro, opt-in
 
 ### Decentralised Threat Network (ICP)
 - Signature database synced every 12 hours from ICP Pattern Canister
-- Pseudonymous zero-day submission — attributed to your device's cryptographic principal
+- Pseudonymous zero-day submission, attributed to your device's cryptographic principal
 - DAO voting for community threat review (Pro, opt-in)
 - Public Threat Intelligence API for developers and researchers
 
 ### Browser Extension (Chrome / Firefox)
 - Intercepts downloads and routes them through the desktop app
 - Live download progress in the extension popup
-- Smart popup blocking — suppresses timed overlays and close-button redirect traps
+- Smart popup blocking: suppresses timed overlays and close-button redirect traps
 - Block popups toggle in the extension popup
 
 ### Pro Tier ($5/month)
@@ -69,14 +69,14 @@ A cross-platform desktop download manager built with Rust and Tauri. ReLay combi
 
 ## Status & Contributing
 
-ReLay is actively developed and not yet production-ready. Core download, torrent, and Shield scanning are functional, but the project is still maturing — there are rough edges and limited test coverage.
+ReLay is actively developed and not yet production-ready. Core download, torrent, and Shield scanning are functional, but the project is still maturing with rough edges and limited test coverage.
 
 **Contributors are welcome.** If you're interested in helping, good places to start:
 
-- **Tests** — unit and integration coverage for chunked downloads, Shield layers, and the Cloudflare Worker
-- **Windows / Linux testing** — most development has been on macOS; bug reports and fixes on other platforms are very valuable
-- **UI polish** — the interface is functional but unrefined; accessibility improvements and UX tweaks are appreciated
-- **Documentation** — inline code comments, architecture write-ups, and contributor guides
+- **Tests**: unit and integration coverage for chunked downloads, Shield layers, and the Cloudflare Worker
+- **Windows / Linux testing**: most development has been on macOS; bug reports and fixes on other platforms are very valuable
+- **UI polish**: the interface is functional but unrefined; accessibility improvements and UX tweaks are appreciated
+- **Documentation**: inline code comments, architecture write-ups, and contributor guides
 
 To get started, see [Building From Source](#building-from-source) below. Open issues are tracked on GitHub at [Justin-Panangos/ReLay/issues](https://github.com/Justin-Panangos/ReLay/issues).
 
@@ -141,15 +141,15 @@ Outputs to `src-tauri/target/release/bundle/`.
 
 ---
 
-## Getting Started — Full Stack Verification
+## Getting Started: Full Stack Verification
 
 This section walks through running and verifying the complete stack end to end.
 
-### Step 1 — Prerequisites
+### Step 1: Prerequisites
 
 Follow the platform-specific steps in **Building From Source** above, then come back here.
 
-### Step 2 — Config file
+### Step 2: Config file
 
 The app reads canister IDs and the worker URL from a `config.toml` at the project root. This file is gitignored (it holds deployment credentials). Create it now:
 
@@ -172,7 +172,7 @@ update     = "brtrl-fyaaa-aaaao-qpsba-cai"
 
 The canister IDs above are the live mainnet deployments. The `worker_url` is available from the seller on request.
 
-### Step 3 — Run in development
+### Step 3: Run in development
 
 ```bash
 npm install
@@ -181,42 +181,42 @@ npm run tauri dev
 
 The app window opens in roughly 30 seconds on first compile (Rust cold build). Subsequent runs are fast.
 
-### Step 4 — What you can test without any credentials
+### Step 4: What you can test without any credentials
 
 These features work immediately with no API keys or accounts:
 
 | Feature | How to test |
 |---|---|
 | HTTP downloads | Paste `https://proof.ovh.net/files/10Mb.dat` and click Start |
-| Chunked parallel download | Watch the download card — speed should exceed a single-connection browser download |
+| Chunked parallel download | Watch the download card; speed should exceed a single-connection browser download |
 | Pause / resume / cancel | Use the controls on any active download card |
 | Torrent (magnet link) | Paste any public-domain magnet link (e.g. Debian ISO) |
-| Queue management | Start multiple downloads — they chain automatically |
-| Shield layers 2–4 | Download any file — YARA, entropy, and file-type checks run automatically, no key needed |
-| EICAR virus test | Download `https://www.eicar.org/download/eicar.com` — Shield should quarantine it |
+| Queue management | Start multiple downloads; they chain automatically |
+| Shield layers 2-4 | Download any file; YARA, entropy, and file-type checks run automatically, no key needed |
+| EICAR virus test | Download `https://www.eicar.org/download/eicar.com`; Shield should quarantine it |
 | Quarantine tab | Quarantined files appear here with restore/delete options |
 | Dark/light theme | Follows OS theme automatically |
 | Settings | All toggles and preferences persist via SQLite |
 
-### Step 5 — What requires credentials
+### Step 5: What requires credentials
 
 | Feature | Credential needed | How to get it |
 |---|---|---|
-| Shield Layer 1 (hash check) | VirusTotal API key | Free at virustotal.com — 500 lookups/day |
+| Shield Layer 1 (hash check) | VirusTotal API key | Free at virustotal.com (500 lookups/day) |
 | Shield Layer 5 (URL reputation) | Same VirusTotal key | Add to Settings → Shield → VirusTotal API Key |
 | ICP pattern sync | `config.toml` with canister IDs | Use the values in Step 2 |
-| Pro features | Paystack test subscription | Use Paystack test mode — request test credentials from seller |
+| Pro features | Paystack test subscription | Use Paystack test mode; request test credentials from seller |
 | Cloudflare Worker endpoints | `worker_url` in `config.toml` | Available from seller on request |
 
-### Step 6 — Verifying the ICP integration
+### Step 6: Verifying the ICP integration
 
 With `config.toml` populated, the app syncs with the ICP Pattern Canister on startup and every 12 hours. To verify it's working:
 
-1. Open **Settings → Shield** — the ICP sync status should show a timestamp
-2. Open **Settings → Pro** — the Identity Canister will return `Free` for any unregistered device (expected)
+1. Open **Settings → Shield**; the ICP sync status should show a timestamp
+2. Open **Settings → Pro**; the Identity Canister will return `Free` for any unregistered device (expected)
 3. The governance canister can be queried directly: `dfx canister call wf57k-faaaa-aaaao-qpr7q-cai get_proposals '()' --network ic`
 
-### Step 7 — Browser extension
+### Step 7: Browser extension
 
 The extension communicates with the desktop app via native messaging. This requires a manifest file placed in a platform-specific OS location. Setup is currently manual (the production installer will handle this automatically):
 
@@ -236,7 +236,7 @@ cp extension/host/com.relay.native.json \
 
 Once placed, load the extension unpacked in Chrome (`chrome://extensions` → Load unpacked → select the `extension/` folder). Right-click any download link → "Download with ReLay".
 
-### Step 8 — Architecture walkthrough
+### Step 8: Architecture walkthrough
 
 For a technical deep-dive, the entry points are:
 
@@ -288,10 +288,10 @@ ReLay uses UPnP to automatically open an inbound port (6881) on your router, whi
 
 **If speeds are still slow:**
 
-- **Strict NAT or corporate firewall** — UPnP won't work. Manually forward TCP/UDP port 6881 on your router.
-- **macOS firewall** — Allow ReLay through `System Settings → Privacy & Security → Firewall`.
-- **Router with UPnP disabled** — Enable UPnP in your router admin panel (usually under Advanced → NAT or WAN settings).
-- **Low-seeder torrent** — If the torrent itself has very few seeders, speeds will be limited regardless of network configuration.
+- **Strict NAT or corporate firewall**: UPnP won't work. Manually forward TCP/UDP port 6881 on your router.
+- **macOS firewall**: Allow ReLay through `System Settings → Privacy & Security → Firewall`.
+- **Router with UPnP disabled**: Enable UPnP in your router admin panel (usually under Advanced → NAT or WAN settings).
+- **Low-seeder torrent**: If the torrent itself has very few seeders, speeds will be limited regardless of network configuration.
 
 ---
 
